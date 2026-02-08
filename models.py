@@ -35,3 +35,17 @@ class PendingMessage(Base):
     __table_args__ = (
         Index('idx_pending_to_username', 'to_username'),
     )
+
+class SessionToken(Base):
+    """WebSocket authentication tokens with expiration"""
+    __tablename__ = "session_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(32), index=True, nullable=False)
+    token_hash = Column(String(128), unique=True, index=True, nullable=False)  # SHA-256 hash of token
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        Index('idx_token_hash_expires', 'token_hash', 'expires_at'),
+    )

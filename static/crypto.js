@@ -52,8 +52,6 @@ async function deriveAuthHash(username, password) {
     );
 
     return arrayBufferToBase64(authBits);
-
-
 }
 
 async function deriveStorageKey(username, password) {
@@ -64,7 +62,6 @@ async function deriveStorageKey(username, password) {
         false,
         ['deriveKey']
     );
-
 
     const storageSalt = encoder.encode(`storage-${username.toLowerCase()}-${VAULT_SALT}`);
 
@@ -80,8 +77,20 @@ async function deriveStorageKey(username, password) {
         false,
         ['encrypt', 'decrypt']
     );
+}
 
+// ==================== SESSION TOKEN GENERATION ====================
+// Generate a cryptographically secure session token for WebSocket authentication
+async function generateSessionToken() {
+    const tokenBytes = randomBytes(32); // 256 bits of randomness
+    return arrayBufferToBase64(tokenBytes.buffer);
+}
 
+// Derive a session authentication hash from username and token
+async function deriveSessionAuth(username, sessionToken) {
+    const combined = encoder.encode(`${username.toLowerCase()}:${sessionToken}`);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', combined);
+    return arrayBufferToBase64(hashBuffer);
 }
 
 // ==================== ECDH KEY GENERATION ====================
@@ -95,7 +104,6 @@ async function generateKeyPair() {
         ['deriveKey']
     );
 
-
     const publicKey = await crypto.subtle.exportKey('raw', keyPair.publicKey);
     const privateKey = await crypto.subtle.exportKey('pkcs8', keyPair.privateKey);
 
@@ -103,14 +111,11 @@ async function generateKeyPair() {
         publicKey: arrayBufferToBase64(publicKey),
         privateKey: arrayBufferToBase64(privateKey)
     };
-
-
 }
 
 // ==================== VAULT ENCRYPTION ====================
 async function encryptVault(privateKey, storageKey) {
     const iv = randomBytes(12);
-
 
     const ciphertext = await crypto.subtle.encrypt(
         {name: 'AES-GCM', iv: iv},
@@ -123,15 +128,12 @@ async function encryptVault(privateKey, storageKey) {
     combined.set(new Uint8Array(ciphertext), iv.length);
 
     return arrayBufferToBase64(combined.buffer);
-
-
 }
 
 async function decryptVault(encryptedVault, storageKey) {
     const combined = new Uint8Array(base64ToArrayBuffer(encryptedVault));
     const iv = combined.slice(0, 12);
     const ciphertext = combined.slice(12);
-
 
     try {
         const decrypted = await crypto.subtle.decrypt(
@@ -144,15 +146,12 @@ async function decryptVault(encryptedVault, storageKey) {
     } catch (e) {
         throw new Error('Decryption failed: Invalid password');
     }
-
-
 }
 
 // ==================== PASSWORD CHANGE ====================
 async function changePassword(username, oldPassword, newPassword, encryptedVault) {
     const oldStorageKey = await deriveStorageKey(username, oldPassword);
     const oldAuthHash = await deriveAuthHash(username, oldPassword);
-
 
     let privateKey;
     try {
@@ -171,8 +170,6 @@ async function changePassword(username, oldPassword, newPassword, encryptedVault
         newAuthHash,
         newEncryptedVault
     };
-
-
 }
 
 // ==================== MESSAGE ENCRYPTION ====================
@@ -211,7 +208,6 @@ async function encryptMessage(message, recipientPublicKey, senderPrivateKey) {
     const priv = await importPrivateKey(senderPrivateKey);
     const sharedKey = await deriveSharedKey(priv, pub);
 
-
     const iv = randomBytes(12);
 
     const ciphertext = await crypto.subtle.encrypt(
@@ -224,15 +220,12 @@ async function encryptMessage(message, recipientPublicKey, senderPrivateKey) {
         ciphertext: arrayBufferToBase64(ciphertext),
         nonce: arrayBufferToBase64(iv.buffer)
     };
-
-
 }
 
 async function decryptMessage(ciphertext, nonce, senderPublicKey, recipientPrivateKey) {
     const pub = await importPublicKey(senderPublicKey);
     const priv = await importPrivateKey(recipientPrivateKey);
     const sharedKey = await deriveSharedKey(priv, pub);
-
 
     const iv = new Uint8Array(base64ToArrayBuffer(nonce));
     const ct = base64ToArrayBuffer(ciphertext);
@@ -244,8 +237,6 @@ async function decryptMessage(ciphertext, nonce, senderPublicKey, recipientPriva
     );
 
     return decoder.decode(decrypted);
-
-
 }
 
 // ==================== EXPORT ====================
@@ -257,5 +248,7 @@ window.CryptoManager = {
     decryptVault,
     changePassword,
     encryptMessage,
-    decryptMessage
+    decryptMessage,
+    generateSessionToken,
+    deriveSessionAuth
 };

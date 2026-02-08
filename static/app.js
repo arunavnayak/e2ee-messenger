@@ -2,17 +2,14 @@
 let currentUser = null;
 let currentRecipient = null;
 let websocket = null;
+let sessionToken = null;  // Store session token for WebSocket auth
 let userKeys = {
     publicKey: null,
     privateKey: null
 };
 let contacts = [];
-//Add chat history store
 let chatHistory = {}; // { username: [ {text, type, timestamp, messageId, status} ] }
-//pending message store
 let pendingMessagesStore = {}; // { "alice": [msg1, msg2], "bob": [msg3] }
-
-// unread message badges
 let unreadCounts = {}; // { "alice": 3, "bob": 1 }
 
 //====================== DATE TIME HELPER ===================
@@ -169,28 +166,29 @@ async function login() {
             const storageKey = await CryptoManager.deriveStorageKey(username, password);
             const privateKey = await CryptoManager.decryptVault(data.encrypted_vault, storageKey);
 
-            // Store keys
+            // Store keys IN MEMORY ONLY
             currentUser = username.toLowerCase();
             userKeys.publicKey = data.public_key;
             userKeys.privateKey = privateKey;
 
-            // Store encrypted vault for password change
+            // Store session token for WebSocket authentication
+            sessionToken = data.session_token;
+
+            // Store only encrypted vault (NOT password)
             sessionStorage.setItem('encryptedVault', data.encrypted_vault);
-            sessionStorage.setItem('currentPassword', password);
 
             // Switch to messenger
             document.getElementById('auth-screen').classList.add('hidden');
             document.getElementById('messenger-screen').classList.remove('hidden');
             document.getElementById('current-user').textContent = currentUser;
 
-            // Connect WebSocket
+            // Connect WebSocket with authentication
             connectWebSocket();
 
             // Load contacts
             await loadContacts();
 
-            // Process pending messages
-            // store pending messages instead of displaying them
+            // Store pending messages
             if (data.pending_messages && data.pending_messages.length > 0) {
                 for (const msg of data.pending_messages) {
                     const from = msg.from;
@@ -204,6 +202,10 @@ async function login() {
             }
 
             showStatus('auth-status', 'Login successful!', false);
+
+            // Clear password from input field
+            document.getElementById('login-password').value = '';
+
         } else {
             showStatus('auth-status', data.detail || 'Login failed', true);
         }
@@ -216,10 +218,16 @@ function logout() {
     if (websocket) {
         websocket.close();
     }
+
+    // Clear all sensitive data
     currentUser = null;
     currentRecipient = null;
+    sessionToken = null;
     userKeys = { publicKey: null, privateKey: null };
     contacts = [];
+    chatHistory = {};
+    pendingMessagesStore = {};
+    unreadCounts = {};
     sessionStorage.clear();
 
     document.getElementById('auth-screen').classList.remove('hidden');
@@ -277,10 +285,17 @@ async function changePassword() {
         const data = await response.json();
 
         if (response.ok) {
+            // Update stored encrypted vault
             sessionStorage.setItem('encryptedVault', result.newEncryptedVault);
-            sessionStorage.setItem('currentPassword', newPassword);
+
             showStatus('password-change-status', 'Password updated successfully!', false);
-            setTimeout(() => hideChangePassword(), 2000);
+            setTimeout(() => {
+                hideChangePassword();
+                // Clear password fields
+                document.getElementById('old-password').value = '';
+                document.getElementById('new-password').value = '';
+                document.getElementById('confirm-new-password').value = '';
+            }, 2000);
         } else {
             showStatus('password-change-status', data.detail || 'Update failed', true);
         }
@@ -296,14 +311,28 @@ function connectWebSocket() {
 
     websocket = new WebSocket(wsUrl);
 
-    websocket.onopen = () => {
-        console.log('WebSocket connected');
+    websocket.onopen = async () => {
+        console.log('WebSocket connected - sending authentication');
+
+        // Send authentication message with session token
+        websocket.send(JSON.stringify({
+            type: 'auth',
+            token: sessionToken
+        }));
     };
 
     websocket.onmessage = async (event) => {
         const data = JSON.parse(event.data);
 
-        if (data.type === 'message') {
+        if (data.type === 'auth_success') {
+            console.log('WebSocket authenticated successfully');
+        } else if (data.type === 'error') {
+            console.error('WebSocket error:', data.message);
+            if (data.message.includes('Authentication') || data.message.includes('Invalid token')) {
+                alert('Session expired. Please login again.');
+                logout();
+            }
+        } else if (data.type === 'message') {
             await handleIncomingMessage(data);
         } else if (data.type === "delivery_status") {
             const bubble = document.querySelector(`[data-message-id="${data.message_id}"]`);
@@ -326,12 +355,22 @@ function connectWebSocket() {
         console.error('WebSocket error:', error);
     };
 
-    websocket.onclose = () => {
-        console.log('WebSocket disconnected');
-        // Reconnect after 3 seconds
-        setTimeout(() => {
-            if (currentUser) connectWebSocket();
-        }, 3000);
+    websocket.onclose = (event) => {
+        console.log('WebSocket disconnected', event.code, event.reason);
+
+        // Don't reconnect if intentionally logged out or auth failed
+        if (event.code === 1008) {  // Policy violation (auth failed)
+            console.log('WebSocket closed due to authentication failure');
+            return;
+        }
+
+        // Reconnect after 3 seconds with exponential backoff
+        if (currentUser && sessionToken) {
+            setTimeout(() => {
+                console.log('Attempting to reconnect WebSocket...');
+                connectWebSocket();
+            }, 3000);
+        }
     };
 }
 
@@ -502,10 +541,8 @@ async function handleIncomingMessage(data) {
                     payload.sender_public_key,
                     userKeys.privateKey
                 );
-                // bubble.textContent = decrypted;
-                // Replace only the text, not the whole bubble
-                const textDiv = bubble.querySelector(".message-text");
 
+                const textDiv = bubble.querySelector(".message-text");
                 textDiv.classList.add("fade-out");
 
                 setTimeout(() => {
@@ -513,7 +550,6 @@ async function handleIncomingMessage(data) {
                     textDiv.classList.remove("fade-out");
                     textDiv.classList.add("fade-in");
 
-                    // make fade-in visible
                     requestAnimationFrame(() => {
                         textDiv.classList.add("show");
                     });
@@ -560,7 +596,6 @@ async function processPendingMessage(msg) {
                 );
 
                 const textDiv = bubble.querySelector(".message-text");
-
                 textDiv.classList.add("fade-out");
 
                 setTimeout(() => {
@@ -568,7 +603,6 @@ async function processPendingMessage(msg) {
                     textDiv.classList.remove("fade-out");
                     textDiv.classList.add("fade-in");
                     requestAnimationFrame(() => {
-
                         textDiv.classList.add("show");
                     });
 
@@ -649,7 +683,6 @@ async function loadContacts() {
             const contactEl = document.createElement('div');
             contactEl.className = 'p-3 bg-gray-700 rounded mb-2 cursor-pointer hover:bg-gray-600 transition';
 
-            //contactEl.textContent = contact.username;
             contactEl.innerHTML = `
                 <div class="flex justify-between items-center">
                     <span>${contact.username}</span>
@@ -672,7 +705,6 @@ async function selectContact(username) {
     // Clear unread count for this user
     unreadCounts[username] = 0;
     updateContactUnreadBadge(username);
-
 
     currentRecipient = username;
     document.getElementById('chat-with').textContent = `Chat with ${username}`;
@@ -712,11 +744,13 @@ async function selectContact(username) {
     }
 
     // ---- 3. Send read receipt AFTER messages are shown ----
-    websocket.send(JSON.stringify({
-        type: "read_receipt",
-        from: currentUser,
-        to: username
-    }));
+    if (websocket && websocket.readyState === WebSocket.OPEN) {
+        websocket.send(JSON.stringify({
+            type: "read_receipt",
+            from: currentUser,
+            to: username
+        }));
+    }
 }
 
 //UI ticks
@@ -867,7 +901,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let typingTimeout;
 
     document.getElementById("message-input").addEventListener("input", () => {
-        if (!currentRecipient) return;
+        if (!currentRecipient || !websocket || websocket.readyState !== WebSocket.OPEN) return;
 
         websocket.send(JSON.stringify({
             type: "typing",

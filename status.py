@@ -7,12 +7,6 @@ from fastapi import APIRouter
 
 router = APIRouter()
 
-
-@router.get("/health")
-def health_check():
-    return {"status": "healthy", "timestamp": time.time()}
-
-
 @router.get("/system-status")
 def get_system_status():
     process = psutil.Process(os.getpid())
