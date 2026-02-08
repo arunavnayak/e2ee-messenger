@@ -1,24 +1,27 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Request
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
-from fastapi.middleware.cors import CORSMiddleware
-from starlette.middleware.base import BaseHTTPMiddleware
-from sqlalchemy.orm import Session
-from typing import Dict, List
-import json
-import asyncio
-from datetime import datetime
 import os
+from datetime import datetime
+from typing import Dict
 
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Request
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, field_validator  # Changed from validator
+from sqlalchemy.orm import Session
+from starlette.middleware.base import BaseHTTPMiddleware
+
+# Local Imports
 from database import engine, get_db, Base
 from models import User, EncryptedVault, PendingMessage
-from pydantic import BaseModel, field_validator  # Changed from validator
-import hashlib
+from status import router as status_router  # Import the router
 
 # Initialize Database
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="E2EE Messenger", version="1.0.0")
+app = FastAPI(title="E2EE Messenger", version="1.0.1")
+
+# This merges the endpoints from status.py into your app
+# Include the Health and System Status router
+app.include_router(status_router)
 
 # WebSocket Connection Manager
 class ConnectionManager:
@@ -39,7 +42,9 @@ class ConnectionManager:
             return True
         return False
 
+
 manager = ConnectionManager()
+
 
 # ==================== SECURITY MIDDLEWARE ====================
 
@@ -50,7 +55,8 @@ class CSPMiddleware(BaseHTTPMiddleware):
         # Strict Content Security Policy - LOCAL ONLY
         csp_directives = [
             "default-src 'self'",
-            "script-src 'self' https://cdn.tailwindcss.com 'unsafe-eval' 'wasm-unsafe-eval'",  # unsafe-eval needed for some libsodium builds
+            "script-src 'self' https://cdn.tailwindcss.com 'unsafe-eval' 'wasm-unsafe-eval'",
+            # unsafe-eval needed for some libsodium builds
             "style-src 'self' 'unsafe-inline'",
             "worker-src 'self' blob:",  # Allow web workers for libsodium
             "connect-src 'self' wss://*.onrender.com ws://localhost:8000 wss://localhost:8000",
@@ -72,8 +78,8 @@ class CSPMiddleware(BaseHTTPMiddleware):
         return response
 
 
-
 app.add_middleware(CSPMiddleware)
+
 
 # ==================== PYDANTIC MODELS ====================
 
@@ -92,9 +98,11 @@ class RegisterRequest(BaseModel):
             raise ValueError('Username must be alphanumeric')
         return v.lower()
 
+
 class LoginRequest(BaseModel):
     username: str
     auth_hash: str
+
 
 class UpdateVaultRequest(BaseModel):
     username: str
@@ -102,10 +110,12 @@ class UpdateVaultRequest(BaseModel):
     new_auth_hash: str
     new_encrypted_vault: str
 
+
 class SendMessageRequest(BaseModel):
     from_username: str
     to_username: str
     encrypted_payload: str
+
 
 # ==================== API ENDPOINTS ====================
 
@@ -133,6 +143,7 @@ async def register(req: RegisterRequest, db: Session = Depends(get_db)):
     db.commit()
 
     return {"status": "success", "message": "User registered successfully"}
+
 
 @app.post("/api/login")
 async def login(req: LoginRequest, db: Session = Depends(get_db)):
@@ -166,6 +177,7 @@ async def login(req: LoginRequest, db: Session = Depends(get_db)):
         "pending_messages": pending_messages
     }
 
+
 @app.post("/api/update-vault")
 async def update_vault(req: UpdateVaultRequest, db: Session = Depends(get_db)):
     """Update vault after password change"""
@@ -186,6 +198,7 @@ async def update_vault(req: UpdateVaultRequest, db: Session = Depends(get_db)):
 
     return {"status": "success", "message": "Password updated successfully"}
 
+
 @app.get("/api/user/{username}/public-key")
 async def get_public_key(username: str, db: Session = Depends(get_db)):
     """Retrieve user's public key for E2EE"""
@@ -196,6 +209,7 @@ async def get_public_key(username: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="User not found")
 
     return {"username": user.username, "public_key": user.public_key}
+
 
 @app.get("/api/users")
 async def list_users(db: Session = Depends(get_db)):
@@ -209,6 +223,7 @@ async def list_users(db: Session = Depends(get_db)):
         ]
     }
 
+
 @app.delete("/api/messages/clear/{username}")
 async def clear_messages(username: str, db: Session = Depends(get_db)):
     """Clear pending messages after delivery"""
@@ -218,7 +233,25 @@ async def clear_messages(username: str, db: Session = Depends(get_db)):
 
     return {"status": "success", "message": "Messages cleared"}
 
+
 # ==================== WEBSOCKET ENDPOINT ====================
+
+@app.websocket("/ws/chat")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    try:
+        while True:
+            data = await websocket.receive_text()
+
+            if data == "ping":
+                await websocket.send_text("pong")
+            else:
+                # Your messenger logic
+                await websocket.send_text(f"Message received: {data}")
+
+    except WebSocketDisconnect:
+        print("Client disconnected")
+
 
 @app.websocket("/ws/{username}")
 async def websocket_endpoint(websocket: WebSocket, username: str, db: Session = Depends(get_db)):
@@ -234,7 +267,7 @@ async def websocket_endpoint(websocket: WebSocket, username: str, db: Session = 
                 from_user = data.get("from")
                 to_user = data.get("to")
                 encrypted_payload = data.get("payload")
-                message_id = data.get("message_id") # required for delivery receipt
+                message_id = data.get("message_id")  # required for delivery receipt
 
                 delivered = await manager.send_personal_message(
                     {
@@ -297,9 +330,11 @@ async def websocket_endpoint(websocket: WebSocket, username: str, db: Session = 
         print(f"WebSocket error: {e}")
         manager.disconnect(username)
 
+
 # ==================== STATIC FILES ====================
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
 
 @app.get("/")
 async def read_root():
@@ -314,11 +349,14 @@ async def read_root():
             status_code=500
         )
 
+
 @app.get("/health")
 async def health_check():
     return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
 
+
 if __name__ == "__main__":
     import uvicorn
+
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
