@@ -2,23 +2,23 @@ services:
   - type: web
     name: e2ee-messenger
     env: python
-    region: oregon
+    region: virginia
     plan: free
-    branch: main
+    branch: master
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHON_VERSION
-        value: 3.11.0
+        value: 3.12.0
       - key: DATABASE_URL
         fromDatabase:
-          name: e2ee-messenger-db
+          name: e2ee-db
           property: connectionString
     autoDeploy: true
 
 databases:
-  - name: e2ee-messenger-db
+  - name: e2ee-db
     databaseName: e2ee_messenger
-    user: e2ee_user
+    user: e2ee_messenger_user
     plan: free
-    region: oregon
+    region: virginia
