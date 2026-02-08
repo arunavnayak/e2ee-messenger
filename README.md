@@ -81,6 +81,71 @@ Deployment
 - render.yaml for service configuration
 - Procfile for process definition
 
+## 🛡️ Security Model
+
+Below is a high‑level overview of how end‑to‑end encryption works in this messenger:
+
+                ┌──────────────────────────────┐
+                │          User A              │
+                │  (Sender - Browser)          │
+                └──────────────┬───────────────┘
+                               │
+                               │ 1. Generate message
+                               │
+                               ▼
+                    ┌──────────────────────┐
+                    │ Encrypt with:        │
+                    │  - User A private key│
+                    │  - User B public key │
+                    └───────────┬──────────┘
+                                │
+                                │ 2. Send ciphertext + nonce
+                                ▼
+                    ┌──────────────────────────────┐
+                    │        Server (Relay)        │
+                    │  - Stores only ciphertext    │
+                    │  - Cannot decrypt anything   │
+                    └───────────┬──────────────────┘
+                                │
+                                │ 3. Deliver encrypted payload
+                                ▼
+                ┌──────────────────────────────┐
+                │          User B              │
+                │   (Recipient - Browser)      │
+                └──────────────┬───────────────┘
+                               │
+                               │ 4. Decrypt with:
+                               │    - User B private key
+                               │    - User A public key
+                               ▼
+                    ┌────────────────────┐
+                    │   Plaintext shown  │
+                    └────────────────────┘
+
+### 🔐 Key Security Principles
+
+- **Private keys never leave the client**
+- **Server stores only encrypted vaults**
+- **Messages are encrypted before leaving the browser**
+- **Password changes re‑encrypt the vault without exposing keys**
+- **WebSocket transport carries only ciphertext**                    
+
+## 🛡️ Security Architecture
+
+Below are visual diagrams illustrating the encryption flow, message lifecycle, and system architecture of E2EE Messenger.
+This shows how a message is encrypted by the sender, relayed by the server, and decrypted by the recipient — all client‑side.
+![](docs/screenshots/BCO.3e9f5d2a-4c95-4263-8f94-6967058282ad.png)
+
+📤 Sequence Diagram: Secure Messaging Lifecycle
+This illustrates the full lifecycle from registration and key exchange to message encryption, relay, and decryption.
+![](docs/screenshots/BCO.75e2e13a-428c-43e1-a333-35dbb4d16256.png)
+
+🏗️ Colorful Architecture Diagram
+This shows the full system architecture: frontend browser, backend Python server, database, WebSocket layer, and encryption vault.
+![](docs/screenshots/BCO.3e2f315c-a260-4020-97f3-53477f83caf7.png)
+
+
+
 🚀 Running Locally
 1. Create virtual environment
 python -m venv venv
