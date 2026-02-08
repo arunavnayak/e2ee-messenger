@@ -81,6 +81,55 @@ Deployment
 - render.yaml for service configuration
 - Procfile for process definition
 
+## 🛡️ Security Model
+
+Below is a high‑level overview of how end‑to‑end encryption works in this messenger:
+
+                ┌──────────────────────────────┐
+                │          User A              │
+                │  (Sender - Browser)          │
+                └──────────────┬───────────────┘
+                               │
+                               │ 1. Generate message
+                               │
+                               ▼
+                    ┌──────────────────────┐
+                    │ Encrypt with:        │
+                    │  - User A private key│
+                    │  - User B public key │
+                    └───────────┬──────────┘
+                                │
+                                │ 2. Send ciphertext + nonce
+                                ▼
+                    ┌──────────────────────────────┐
+                    │        Server (Relay)        │
+                    │  - Stores only ciphertext    │
+                    │  - Cannot decrypt anything   │
+                    └───────────┬──────────────────┘
+                                │
+                                │ 3. Deliver encrypted payload
+                                ▼
+                ┌──────────────────────────────┐
+                │          User B              │
+                │   (Recipient - Browser)      │
+                └──────────────┬───────────────┘
+                               │
+                               │ 4. Decrypt with:
+                               │    - User B private key
+                               │    - User A public key
+                               ▼
+                    ┌────────────────────┐
+                    │   Plaintext shown  │
+                    └────────────────────┘
+
+### 🔐 Key Security Principles
+
+- **Private keys never leave the client**
+- **Server stores only encrypted vaults**
+- **Messages are encrypted before leaving the browser**
+- **Password changes re‑encrypt the vault without exposing keys**
+- **WebSocket transport carries only ciphertext**                    
+
 🚀 Running Locally
 1. Create virtual environment
 python -m venv venv
