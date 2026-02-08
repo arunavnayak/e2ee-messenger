@@ -185,6 +185,7 @@ This project is licensed under the MIT License.
 
 ### 🔐 Login & Registration
 Secure onboarding with password‑derived keys and encrypted private key vault.
+![Login Screenshot](docs/screenshots/register.png)
 ![Login Screenshot](docs/screenshots/login.png)
 
 ### 💬 Real‑Time Chat
