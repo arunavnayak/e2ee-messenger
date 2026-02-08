@@ -11,6 +11,8 @@ services:
     runtime: python3.12
 
     envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
       - key: DATABASE_URL
         fromDatabase:
           name: e2ee-db
