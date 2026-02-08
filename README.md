@@ -95,12 +95,9 @@ pip install -r requirements.txt
 3. Start the server
 python main.py
 
-
 4. Open the app
 Visit:
 http://localhost:5000
-
-
 
 🌐 Deploying to Render
 This project includes:
@@ -119,4 +116,17 @@ This project is licensed under the MIT License.
 - Message search
 - Online/offline presence indicators
 
+## 📸 Screenshots
+
+### 🔐 Login & Registration
+Secure onboarding with password‑derived keys and encrypted private key vault.
+![Login Screenshot](docs/screenshots/login.png)
+
+### 💬 Real‑Time Chat
+End‑to‑end encrypted messaging with delivery/read receipts, typing indicators, and smooth UI transitions.
+![Chat Screenshot](docs/screenshots/chat.png)
+
+### 🔔 Unread Message Badges
+Unread counters for each contact, updated in real time.
+![Unread Screenshot](docs/screenshots/unread.png)
 
