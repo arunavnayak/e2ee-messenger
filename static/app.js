@@ -2,107 +2,108 @@
 let currentUser = null;
 let currentRecipient = null;
 let websocket = null;
-let sessionToken = null;  // Store session token for WebSocket auth
+let sessionToken = null;
 let userKeys = {
     publicKey: null,
     privateKey: null
 };
 let contacts = [];
-let chatHistory = {}; // { username: [ {text, type, timestamp, messageId, status} ] }
-let pendingMessagesStore = {}; // { "alice": [msg1, msg2], "bob": [msg3] }
-let unreadCounts = {}; // { "alice": 3, "bob": 1 }
+let chatHistory = {}; // { username: [ {text, type, timestamp, messageId, status, date} ] }
+let pendingMessagesStore = {};
+let unreadCounts = {};
+let typingTimeout = null;
 
-//====================== DATE TIME HELPER ===================
-function formatDateLabel(date) {
-    const d = new Date(date);
-    const today = new Date();
-
-    const isToday = d.toDateString() === today.toDateString();
-
-    const yesterday = new Date();
-    yesterday.setDate(today.getDate() - 1);
-    const isYesterday = d.toDateString() === yesterday.toDateString();
-
-    if (isToday) return "Today";
-    if (isYesterday) return "Yesterday";
-
-    return d.toLocaleDateString();
+// ==================== UTILITY FUNCTIONS ====================
+function getInitials(name) {
+    return name.slice(0, 2).toUpperCase();
 }
 
-function formatTime(date) {
-    return new Date(date).toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit"
+function formatTime(timestamp) {
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString('en-US', {
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
     });
 }
 
+function formatDate(timestamp) {
+    const date = new Date(timestamp);
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
 
-// ==================== UI HELPERS ====================
+    if (date.toDateString() === today.toDateString()) {
+        return 'Today';
+    } else if (date.toDateString() === yesterday.toDateString()) {
+        return 'Yesterday';
+    } else {
+        return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    }
+}
+
 function showStatus(elementId, message, isError = false) {
     const el = document.getElementById(elementId);
     el.textContent = message;
-    el.className = isError ? 'mt-4 text-center text-sm text-red-400' : 'mt-4 text-center text-sm text-green-400';
+    el.className = isError ? 'status-message error' : 'status-message success';
 }
 
-function showLogin() {
-    document.getElementById('login-form').classList.remove('hidden');
-    document.getElementById('register-form').classList.add('hidden');
+function clearStatus(elementId) {
+    const el = document.getElementById(elementId);
+    el.className = 'status-message';
+    el.textContent = '';
 }
 
-function showRegister() {
-    document.getElementById('login-form').classList.add('hidden');
-    document.getElementById('register-form').classList.remove('hidden');
-}
+// ==================== TAB SWITCHING ====================
+function switchTab(tab) {
+    const loginForm = document.getElementById('loginForm');
+    const registerForm = document.getElementById('registerForm');
+    const tabBtns = document.querySelectorAll('.tab-btn');
 
-function showChangePassword() {
-    document.getElementById('change-password-modal').classList.remove('hidden');
-}
+    clearStatus('authStatus');
 
-function hideChangePassword() {
-    document.getElementById('change-password-modal').classList.add('hidden');
-    document.getElementById('old-password').value = '';
-    document.getElementById('new-password').value = '';
-    document.getElementById('confirm-new-password').value = '';
-    document.getElementById('password-change-status').textContent = '';
+    if (tab === 'login') {
+        loginForm.classList.add('active');
+        registerForm.classList.remove('active');
+        tabBtns[0].classList.add('active');
+        tabBtns[1].classList.remove('active');
+    } else {
+        loginForm.classList.remove('active');
+        registerForm.classList.add('active');
+        tabBtns[0].classList.remove('active');
+        tabBtns[1].classList.add('active');
+    }
 }
 
 // ==================== AUTHENTICATION ====================
-async function register() {
-    const username = document.getElementById('register-username').value.trim();
-    const password = document.getElementById('register-password').value;
-    const confirm = document.getElementById('register-confirm').value;
+async function handleRegister() {
+    const username = document.getElementById('registerUsername').value.trim();
+    const password = document.getElementById('registerPassword').value;
+    const confirm = document.getElementById('registerConfirm').value;
 
-    if (!username || !password) {
-        showStatus('auth-status', 'Please fill all fields', true);
+    if (!username || !password || !confirm) {
+        showStatus('authStatus', 'Please fill all fields', true);
         return;
     }
 
     if (password !== confirm) {
-        showStatus('auth-status', 'Passwords do not match', true);
+        showStatus('authStatus', 'Passwords do not match', true);
         return;
     }
 
     if (password.length < 12) {
-        showStatus('auth-status', 'Password must be at least 12 characters', true);
+        showStatus('authStatus', 'Password must be at least 12 characters', true);
         return;
     }
 
     try {
-        showStatus('auth-status', 'Generating encryption keys...', false);
+        showStatus('authStatus', 'Generating encryption keys...', false);
 
-        // Generate key pair
         const keyPair = await CryptoManager.generateKeyPair();
-
-        // Derive authentication hash
         const authHash = await CryptoManager.deriveAuthHash(username, password);
-
-        // Derive storage key
         const storageKey = await CryptoManager.deriveStorageKey(username, password);
-
-        // Encrypt private key into vault
         const encryptedVault = await CryptoManager.encryptVault(keyPair.privateKey, storageKey);
 
-        // Register with server
         const response = await fetch('/api/register', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -117,37 +118,35 @@ async function register() {
         const data = await response.json();
 
         if (response.ok) {
-            showStatus('auth-status', 'Registration successful! Logging in...', false);
+            showStatus('authStatus', 'Registration successful! Logging in...', false);
             setTimeout(() => {
-                document.getElementById('login-username').value = username;
-                document.getElementById('login-password').value = password;
-                showLogin();
-                login();
+                document.getElementById('loginUsername').value = username;
+                document.getElementById('loginPassword').value = password;
+                switchTab('login');
+                handleLogin();
             }, 1000);
         } else {
-            showStatus('auth-status', data.detail || 'Registration failed', true);
+            showStatus('authStatus', data.detail || 'Registration failed', true);
         }
     } catch (error) {
-        showStatus('auth-status', 'Error: ' + error.message, true);
+        showStatus('authStatus', 'Error: ' + error.message, true);
     }
 }
 
-async function login() {
-    const username = document.getElementById('login-username').value.trim();
-    const password = document.getElementById('login-password').value;
+async function handleLogin() {
+    const username = document.getElementById('loginUsername').value.trim();
+    const password = document.getElementById('loginPassword').value;
 
     if (!username || !password) {
-        showStatus('auth-status', 'Please enter username and password', true);
+        showStatus('authStatus', 'Please enter username and password', true);
         return;
     }
 
     try {
-        showStatus('auth-status', 'Authenticating...', false);
+        showStatus('authStatus', 'Authenticating...', false);
 
-        // Derive authentication hash
         const authHash = await CryptoManager.deriveAuthHash(username, password);
 
-        // Login to server
         const response = await fetch('/api/login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -160,66 +159,51 @@ async function login() {
         const data = await response.json();
 
         if (response.ok) {
-            showStatus('auth-status', 'Decrypting vault...', false);
+            showStatus('authStatus', 'Decrypting vault...', false);
 
-            // Derive storage key and decrypt vault
             const storageKey = await CryptoManager.deriveStorageKey(username, password);
             const privateKey = await CryptoManager.decryptVault(data.encrypted_vault, storageKey);
 
-            // Store keys IN MEMORY ONLY
             currentUser = username.toLowerCase();
             userKeys.publicKey = data.public_key;
             userKeys.privateKey = privateKey;
-
-            // Store session token for WebSocket authentication
             sessionToken = data.session_token;
 
-            // Store only encrypted vault (NOT password)
             sessionStorage.setItem('encryptedVault', data.encrypted_vault);
-
-            // Switch to messenger
-            document.getElementById('auth-screen').classList.add('hidden');
-            document.getElementById('messenger-screen').classList.remove('hidden');
-            document.getElementById('current-user').textContent = currentUser;
-
-            // Connect WebSocket with authentication
-            connectWebSocket();
-
-            // Load contacts
-            await loadContacts();
 
             // Store pending messages
             if (data.pending_messages && data.pending_messages.length > 0) {
                 for (const msg of data.pending_messages) {
-                    const from = msg.from;
-
-                    if (!pendingMessagesStore[from]) {
-                        pendingMessagesStore[from] = [];
+                    if (!pendingMessagesStore[msg.from]) {
+                        pendingMessagesStore[msg.from] = [];
                     }
-
-                    pendingMessagesStore[from].push(msg);
+                    pendingMessagesStore[msg.from].push(msg);
                 }
             }
 
-            showStatus('auth-status', 'Login successful!', false);
+            // Switch to chat interface
+            document.getElementById('authScreen').style.display = 'none';
+            document.getElementById('chatContainer').style.display = 'block';
+            document.getElementById('userListPage').style.display = 'flex';
 
-            // Clear password from input field
-            document.getElementById('login-password').value = '';
+            connectWebSocket();
+            await loadContacts();
 
+            // Clear password
+            document.getElementById('loginPassword').value = '';
         } else {
-            showStatus('auth-status', data.detail || 'Login failed', true);
+            showStatus('authStatus', data.detail || 'Login failed', true);
         }
     } catch (error) {
-        showStatus('auth-status', 'Error: ' + error.message, true);
+        showStatus('authStatus', 'Error: ' + error.message, true);
     }
 }
 
-function logout() {
+function handleLogout() {
     if (websocket) {
         websocket.close();
     }
 
-    // Clear all sensitive data
     currentUser = null;
     currentRecipient = null;
     sessionToken = null;
@@ -230,39 +214,72 @@ function logout() {
     unreadCounts = {};
     sessionStorage.clear();
 
-    document.getElementById('auth-screen').classList.remove('hidden');
-    document.getElementById('messenger-screen').classList.add('hidden');
-    document.getElementById('messages-container').innerHTML = '';
-    document.getElementById('login-password').value = '';
+    document.getElementById('authScreen').style.display = 'flex';
+    document.getElementById('chatContainer').style.display = 'none';
+    document.getElementById('loginPassword').value = '';
+
+    closeSettings();
 }
 
+// ==================== SETTINGS MENU ====================
+function toggleSettings() {
+    const menu = document.getElementById('settingsMenu');
+    menu.classList.toggle('show');
+}
+
+function closeSettings() {
+    const menu = document.getElementById('settingsMenu');
+    menu.classList.remove('show');
+}
+
+// Click outside to close settings
+document.addEventListener('click', (e) => {
+    const settingsMenu = document.getElementById('settingsMenu');
+    const settingsBtn = e.target.closest('.header-icons button');
+
+    if (!settingsBtn && !e.target.closest('.settings-menu')) {
+        closeSettings();
+    }
+});
+
 // ==================== PASSWORD CHANGE ====================
-async function changePassword() {
-    const oldPassword = document.getElementById('old-password').value;
-    const newPassword = document.getElementById('new-password').value;
-    const confirmPassword = document.getElementById('confirm-new-password').value;
+function showChangePasswordModal() {
+    document.getElementById('passwordModal').classList.add('show');
+    closeSettings();
+}
+
+function hidePasswordModal() {
+    document.getElementById('passwordModal').classList.remove('show');
+    document.getElementById('oldPassword').value = '';
+    document.getElementById('newPassword').value = '';
+    document.getElementById('confirmNewPassword').value = '';
+    clearStatus('passwordStatus');
+}
+
+async function handlePasswordChange() {
+    const oldPassword = document.getElementById('oldPassword').value;
+    const newPassword = document.getElementById('newPassword').value;
+    const confirmPassword = document.getElementById('confirmNewPassword').value;
 
     if (!oldPassword || !newPassword || !confirmPassword) {
-        showStatus('password-change-status', 'Please fill all fields', true);
+        showStatus('passwordStatus', 'Please fill all fields', true);
         return;
     }
 
     if (newPassword !== confirmPassword) {
-        showStatus('password-change-status', 'New passwords do not match', true);
+        showStatus('passwordStatus', 'New passwords do not match', true);
         return;
     }
 
     if (newPassword.length < 12) {
-        showStatus('password-change-status', 'Password must be at least 12 characters', true);
+        showStatus('passwordStatus', 'Password must be at least 12 characters', true);
         return;
     }
 
     try {
-        showStatus('password-change-status', 'Re-encrypting vault...', false);
+        showStatus('passwordStatus', 'Re-encrypting vault...', false);
 
         const encryptedVault = sessionStorage.getItem('encryptedVault');
-
-        // Re-encrypt vault with new password
         const result = await CryptoManager.changePassword(
             currentUser,
             oldPassword,
@@ -270,7 +287,6 @@ async function changePassword() {
             encryptedVault
         );
 
-        // Send to server
         const response = await fetch('/api/update-vault', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -285,22 +301,16 @@ async function changePassword() {
         const data = await response.json();
 
         if (response.ok) {
-            // Update stored encrypted vault
             sessionStorage.setItem('encryptedVault', result.newEncryptedVault);
-
-            showStatus('password-change-status', 'Password updated successfully!', false);
+            showStatus('passwordStatus', 'Password updated successfully!', false);
             setTimeout(() => {
-                hideChangePassword();
-                // Clear password fields
-                document.getElementById('old-password').value = '';
-                document.getElementById('new-password').value = '';
-                document.getElementById('confirm-new-password').value = '';
+                hidePasswordModal();
             }, 2000);
         } else {
-            showStatus('password-change-status', data.detail || 'Update failed', true);
+            showStatus('passwordStatus', data.detail || 'Update failed', true);
         }
     } catch (error) {
-        showStatus('password-change-status', 'Error: ' + error.message, true);
+        showStatus('passwordStatus', 'Error: ' + error.message, true);
     }
 }
 
@@ -314,7 +324,6 @@ function connectWebSocket() {
     websocket.onopen = async () => {
         console.log('WebSocket connected - sending authentication');
 
-        // Send authentication message with session token
         websocket.send(JSON.stringify({
             type: 'auth',
             token: sessionToken
@@ -330,24 +339,16 @@ function connectWebSocket() {
             console.error('WebSocket error:', data.message);
             if (data.message.includes('Authentication') || data.message.includes('Invalid token')) {
                 alert('Session expired. Please login again.');
-                logout();
+                handleLogout();
             }
         } else if (data.type === 'message') {
             await handleIncomingMessage(data);
-        } else if (data.type === "delivery_status") {
-            const bubble = document.querySelector(`[data-message-id="${data.message_id}"]`);
-            if (bubble) {
-                bubble.dataset.status = "delivered";
-                updateBubbleStatus(bubble);
-            }
-        } else if (data.type === "read_receipt") {
-            const bubbles = document.querySelectorAll(".message-bubble.sent");
-            bubbles.forEach(b => {
-                b.dataset.status = "read";
-                updateBubbleStatus(b);
-            });
-        } else if (data.type === "typing") {
-            showTypingIndicator();
+        } else if (data.type === 'delivery_status') {
+            updateMessageStatus(data.message_id, data.status);
+        } else if (data.type === 'read_receipt') {
+            markMessagesAsRead(data.from);
+        } else if (data.type === 'typing') {
+            showTypingIndicator(data.from);
         }
     };
 
@@ -358,13 +359,11 @@ function connectWebSocket() {
     websocket.onclose = (event) => {
         console.log('WebSocket disconnected', event.code, event.reason);
 
-        // Don't reconnect if intentionally logged out or auth failed
-        if (event.code === 1008) {  // Policy violation (auth failed)
+        if (event.code === 1008) {
             console.log('WebSocket closed due to authentication failure');
             return;
         }
 
-        // Reconnect after 3 seconds with exponential backoff
         if (currentUser && sessionToken) {
             setTimeout(() => {
                 console.log('Attempting to reconnect WebSocket...');
@@ -372,300 +371,6 @@ function connectWebSocket() {
             }, 3000);
         }
     };
-}
-
-// ==================== MESSAGING ====================
-async function sendMessage() {
-    const input = document.getElementById('message-input');
-    const message = input.value.trim();
-
-    if (!message || !currentRecipient) {
-        return;
-    }
-
-    const messageId = crypto.randomUUID();
-    const timestamp = Date.now();
-
-    // If WebSocket is not open → show failed bubble immediately
-    if (!websocket || websocket.readyState !== WebSocket.OPEN) {
-        const bubble = displayMessage(message, 'sent', timestamp, messageId, "failed");
-        bubble.dataset.messageId = messageId;
-        bubble.dataset.status = "failed";
-        updateBubbleStatus(bubble);
-
-        // Save to history
-        if (!chatHistory[currentRecipient]) chatHistory[currentRecipient] = [];
-        chatHistory[currentRecipient].push({
-            text: message,
-            type: "sent",
-            timestamp,
-            messageId,
-            status: "failed"
-        });
-
-        return;
-    }
-
-    try {
-        // Get recipient's public key
-        const recipientContact = contacts.find(c => c.username === currentRecipient);
-        if (!recipientContact) {
-            alert('Recipient not found');
-            return;
-        }
-
-        // Encrypt message
-        const encrypted = await CryptoManager.encryptMessage(
-            message,
-            recipientContact.public_key,
-            userKeys.privateKey
-        );
-
-        // Create payload
-        const payload = JSON.stringify({
-            sender_public_key: userKeys.publicKey,
-            ciphertext: encrypted.ciphertext,
-            nonce: encrypted.nonce
-        });
-
-        // Send via WebSocket
-        websocket.send(JSON.stringify({
-            type: 'message',
-            from: currentUser,
-            to: currentRecipient,
-            payload: payload,
-            message_id: messageId
-        }));
-
-        // Display bubble immediately (optimistic UI)
-        const bubble = displayMessage(message, 'sent', timestamp, messageId, "sent");
-        bubble.dataset.messageId = messageId;
-        bubble.dataset.status = "sent";
-        updateBubbleStatus(bubble);
-
-        // Save to history
-        if (!chatHistory[currentRecipient]) chatHistory[currentRecipient] = [];
-        chatHistory[currentRecipient].push({
-            text: message,
-            type: "sent",
-            timestamp,
-            messageId,
-            status: "sent"
-        });
-
-        input.value = '';
-
-    } catch (error) {
-        console.error('Error sending message:', error);
-
-        // Show failed bubble
-        const bubble = displayMessage(message, 'sent', timestamp, messageId, "failed");
-        bubble.dataset.messageId = messageId;
-        bubble.dataset.status = "failed";
-        updateBubbleStatus(bubble);
-
-        // Save failed message to history
-        if (!chatHistory[currentRecipient]) chatHistory[currentRecipient] = [];
-        chatHistory[currentRecipient].push({
-            text: message,
-            type: "sent",
-            timestamp,
-            messageId,
-            status: "failed"
-        });
-    }
-}
-
-async function handleIncomingMessage(data) {
-    try {
-        // ⭐ UNREAD BADGE + SAVE TO HISTORY BUT DO NOT DISPLAY ⭐
-        if (data.from !== currentRecipient) {
-            if (!unreadCounts[data.from]) unreadCounts[data.from] = 0;
-            unreadCounts[data.from]++;
-            updateContactUnreadBadge(data.from);
-
-            const payload = JSON.parse(data.payload);
-            const encryptedPreview = payload.ciphertext.slice(0, 40) + '...';
-            const serverTimestamp = new Date(data.timestamp).getTime();
-
-            if (!chatHistory[data.from]) chatHistory[data.from] = [];
-            chatHistory[data.from].push({
-                text: encryptedPreview,
-                type: "received",
-                timestamp: serverTimestamp,
-                messageId: data.message_id || null,
-                status: null
-            });
-
-            // decrypt in background
-            setTimeout(async () => {
-                try {
-                    const decrypted = await CryptoManager.decryptMessage(
-                        payload.ciphertext,
-                        payload.nonce,
-                        payload.sender_public_key,
-                        userKeys.privateKey
-                    );
-                    updateHistoryMessage(data.from, serverTimestamp, decrypted);
-                } catch {
-                    updateHistoryMessage(data.from, serverTimestamp, "[Decryption failed]");
-                }
-            }, 1000);
-
-            return; // DO NOT DISPLAY
-        }
-
-        const payload = JSON.parse(data.payload);
-
-        // Show encrypted preview
-        const encryptedPreview = payload.ciphertext.slice(0, 40) + '...';
-        const serverTimestamp = new Date(data.timestamp).getTime();
-        const bubble = displayMessage(encryptedPreview, 'received', serverTimestamp);
-
-        // Save encrypted preview to history for active chat
-        if (!chatHistory[currentRecipient]) chatHistory[currentRecipient] = [];
-        chatHistory[currentRecipient].push({
-            text: encryptedPreview,
-            type: "received",
-            timestamp: serverTimestamp,
-            messageId: data.message_id || null,
-            status: null
-        });
-
-        // Decrypt after delay
-        setTimeout(async () => {
-            try {
-                const decrypted = await CryptoManager.decryptMessage(
-                    payload.ciphertext,
-                    payload.nonce,
-                    payload.sender_public_key,
-                    userKeys.privateKey
-                );
-
-                const textDiv = bubble.querySelector(".message-text");
-                textDiv.classList.add("fade-out");
-
-                setTimeout(() => {
-                    textDiv.textContent = decrypted;
-                    textDiv.classList.remove("fade-out");
-                    textDiv.classList.add("fade-in");
-
-                    requestAnimationFrame(() => {
-                        textDiv.classList.add("show");
-                    });
-
-                    updateHistoryMessage(data.from, serverTimestamp, decrypted);
-                }, 300);
-            } catch (e) {
-                const textDiv = bubble.querySelector(".message-text");
-                textDiv.textContent = "[Decryption failed]";
-            }
-        }, 1000);
-
-    } catch (error) {
-        console.error('Error handling message:', error);
-    }
-}
-
-
-async function processPendingMessage(msg) {
-    try {
-        const payload = JSON.parse(msg.payload);
-
-        const encryptedPreview = payload.ciphertext.slice(0, 40) + '...';
-        const serverTimestamp = new Date(msg.timestamp).getTime();
-        const bubble = displayMessage(encryptedPreview, 'received', serverTimestamp);
-
-        // Save encrypted preview to history
-        if (!chatHistory[currentRecipient]) chatHistory[currentRecipient] = [];
-        chatHistory[currentRecipient].push({
-            text: encryptedPreview,
-            type: "received",
-            timestamp: serverTimestamp,
-            messageId: msg.message_id || null,
-            status: null
-        });
-
-        setTimeout(async () => {
-            try {
-                const decrypted = await CryptoManager.decryptMessage(
-                    payload.ciphertext,
-                    payload.nonce,
-                    payload.sender_public_key,
-                    userKeys.privateKey
-                );
-
-                const textDiv = bubble.querySelector(".message-text");
-                textDiv.classList.add("fade-out");
-
-                setTimeout(() => {
-                    textDiv.textContent = decrypted;
-                    textDiv.classList.remove("fade-out");
-                    textDiv.classList.add("fade-in");
-                    requestAnimationFrame(() => {
-                        textDiv.classList.add("show");
-                    });
-
-                    updateHistoryMessage(msg.from, serverTimestamp, decrypted);
-                }, 300);
-
-            } catch (e) {
-                const textDiv = bubble.querySelector(".message-text");
-                textDiv.textContent = "[Decryption failed]";
-            }
-        }, 1000);
-
-    } catch (error) {
-        console.error('Error processing pending message:', error);
-    }
-}
-
-function displayMessage(text, type, timestamp = Date.now(), messageId = null, status = null) {
-    const container = document.getElementById("messages-container");
-
-    // ---- DATE SEPARATOR LOGIC ----
-    const dateLabel = formatDateLabel(timestamp);
-    const lastSeparator = container.querySelector(".date-separator:last-of-type");
-    const lastSeparatorText = lastSeparator ? lastSeparator.getAttribute("data-date") : null;
-
-    if (dateLabel !== lastSeparatorText) {
-        const sep = document.createElement("div");
-        sep.className = "date-separator text-gray-400 text-center text-xs my-2";
-        sep.setAttribute("data-date", dateLabel);
-        sep.textContent = dateLabel;
-        container.appendChild(sep);
-    }
-
-    // ---- MESSAGE BUBBLE ----
-    const bubble = document.createElement("div");
-    bubble.className = `message-bubble ${type} fade-in`;
-
-    bubble.innerHTML = `
-        <div class="message-text">${text}</div>
-        <div class="message-meta flex items-center justify-end gap-1 mt-1">
-            <span class="message-time text-xs opacity-70">${formatTime(timestamp)}</span>
-            <span class="tick text-xs opacity-70"></span>
-        </div>
-    `;
-
-    // attach messageId + status if provided
-    if (messageId) bubble.dataset.messageId = messageId;
-    if (status) {
-        bubble.dataset.status = status;
-        updateBubbleStatus(bubble);
-    }
-
-    container.appendChild(bubble);
-
-    // trigger fade-in
-    requestAnimationFrame(() => {
-        bubble.classList.add("show");
-    });
-
-    // ---- AUTO SCROLL ----
-    container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
-
-    return bubble;
 }
 
 // ==================== CONTACTS ====================
@@ -676,141 +381,190 @@ async function loadContacts() {
 
         contacts = data.users.filter(u => u.username !== currentUser);
 
-        const contactsList = document.getElementById('contacts-list');
-        contactsList.innerHTML = '';
-
-        contacts.forEach(contact => {
-            const contactEl = document.createElement('div');
-            contactEl.className = 'p-3 bg-gray-700 rounded mb-2 cursor-pointer hover:bg-gray-600 transition';
-
-            contactEl.innerHTML = `
-                <div class="flex justify-between items-center">
-                    <span>${contact.username}</span>
-                    <span id="badge-${contact.username}" 
-                          class="hidden bg-blue-500 text-white text-xs px-2 py-1 rounded-full">
-                    </span>
-                </div>
-            `;
-
-            contactEl.addEventListener('click', () => selectContact(contact.username));
-            contactsList.appendChild(contactEl);
-        });
-        contacts.forEach(c => updateContactUnreadBadge(c.username));
+        renderUsersList();
     } catch (error) {
         console.error('Error loading contacts:', error);
     }
 }
 
-async function selectContact(username) {
-    // Clear unread count for this user
-    unreadCounts[username] = 0;
-    updateContactUnreadBadge(username);
+function renderUsersList() {
+    const usersList = document.getElementById('usersList');
+    usersList.innerHTML = '';
 
-    currentRecipient = username;
-    document.getElementById('chat-with').textContent = `Chat with ${username}`;
+    const sortedContacts = contacts.sort((a, b) => {
+        const aHistory = chatHistory[a.username];
+        const bHistory = chatHistory[b.username];
 
-    const container = document.getElementById('messages-container');
-    container.innerHTML = '';
+        if (!aHistory && !bHistory) return 0;
+        if (!aHistory) return 1;
+        if (!bHistory) return -1;
 
-    // ---- 1. Load chat history first ----
-    const history = chatHistory[username] || [];
+        const aLast = aHistory[aHistory.length - 1].timestamp;
+        const bLast = bHistory[bHistory.length - 1].timestamp;
 
-    history.forEach(msg => {
-        const bubble = displayMessage(
-            msg.text,
-            msg.type,
-            msg.timestamp,
-            msg.messageId,
-            msg.status
-        );
-
-        if (msg.messageId) {
-            bubble.dataset.messageId = msg.messageId;
-        }
-        if (msg.status) {
-            bubble.dataset.status = msg.status;
-            updateBubbleStatus(bubble);
-        }
+        return bLast - aLast;
     });
 
-    // ---- 2. Load pending messages for this user ----
+    sortedContacts.forEach(contact => {
+        const userItem = document.createElement('div');
+        userItem.className = 'user-item';
+
+        // Add event listener instead of onclick
+        userItem.addEventListener('click', () => openChat(contact.username));
+
+        const history = chatHistory[contact.username];
+        const lastMsg = history && history.length > 0 ? history[history.length - 1] : null;
+        const unreadCount = unreadCounts[contact.username] || 0;
+
+        userItem.innerHTML = `
+            <div class="user-avatar">${getInitials(contact.username)}</div>
+            <div class="user-info">
+                <div class="user-name">${contact.username}</div>
+                <div class="user-last-message">
+                    ${lastMsg ? (lastMsg.type === 'sent' ? 'You: ' : '') + lastMsg.text.substring(0, 30) + (lastMsg.text.length > 30 ? '...' : '') : 'No messages yet'}
+                </div>
+            </div>
+            <div class="user-meta">
+                <div class="message-time">${lastMsg ? formatTime(lastMsg.timestamp) : ''}</div>
+                ${unreadCount > 0 ? `<div class="unread-badge">${unreadCount}</div>` : ''}
+            </div>
+        `;
+
+        usersList.appendChild(userItem);
+    });
+}
+
+function filterUsers() {
+    const search = document.getElementById('userSearch').value.toLowerCase();
+    const userItems = document.querySelectorAll('.user-item');
+
+    userItems.forEach(item => {
+        const name = item.querySelector('.user-name').textContent.toLowerCase();
+        item.style.display = name.includes(search) ? 'flex' : 'none';
+    });
+}
+
+// ==================== CHAT PAGE ====================
+async function openChat(username) {
+    currentRecipient = username;
+
+    // Clear unread count
+    unreadCounts[username] = 0;
+    renderUsersList();
+
+    // Update UI
+    document.getElementById('userListPage').style.display = 'none';
+    document.getElementById('chatPage').style.display = 'flex';
+    document.getElementById('chatUserAvatar').textContent = getInitials(username);
+    document.getElementById('chatUserName').textContent = username;
+
+    // Load messages
+    const messagesArea = document.getElementById('messagesArea');
+    messagesArea.innerHTML = '';
+
+    const history = chatHistory[username] || [];
+    let lastDate = null;
+
+    history.forEach(msg => {
+        const msgDate = formatDate(msg.timestamp);
+
+        if (msgDate !== lastDate) {
+            const dateDivider = document.createElement('div');
+            dateDivider.className = 'date-divider';
+            dateDivider.innerHTML = `<span>${msgDate}</span>`;
+            messagesArea.appendChild(dateDivider);
+            lastDate = msgDate;
+        }
+
+        const messageEl = createMessageElement(msg);
+        messagesArea.appendChild(messageEl);
+    });
+
+    // Load pending messages
     if (pendingMessagesStore[username]) {
         for (const msg of pendingMessagesStore[username]) {
             await processPendingMessage(msg);
         }
-
-        // Clear them after displaying
         delete pendingMessagesStore[username];
     }
 
-    // ---- 3. Send read receipt AFTER messages are shown ----
+    // Scroll to bottom
+    messagesArea.scrollTop = messagesArea.scrollHeight;
+
+    // Send read receipt
     if (websocket && websocket.readyState === WebSocket.OPEN) {
         websocket.send(JSON.stringify({
-            type: "read_receipt",
+            type: 'read_receipt',
             from: currentUser,
             to: username
         }));
     }
 }
 
-//UI ticks
-function updateBubbleStatus(bubble) {
-    const status = bubble.dataset.status;
-    const tick = bubble.querySelector(".tick");
+function backToUserList() {
+    currentRecipient = null;
+    document.getElementById('chatPage').style.display = 'none';
+    document.getElementById('userListPage').style.display = 'flex';
+    hideTypingIndicator();
+}
 
-    if (!tick) return;
+function createMessageElement(msg) {
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `message ${msg.type}`;
+    messageDiv.dataset.messageId = msg.messageId;
 
-    if (status === "sent") {
-        tick.textContent = "✓";
-        tick.className = "tick grey";
-    }
+    const statusIcon = getStatusIcon(msg.status);
 
-    if (status === "delivered") {
-        tick.textContent = "✓✓";
-        tick.className = "tick grey";
-    }
+    messageDiv.innerHTML = `
+        <div class="message-bubble">
+            <div class="message-text ${msg.text.includes('...') ? 'encrypted' : ''}">${msg.text}</div>
+            <div class="message-footer">
+                <span>${formatTime(msg.timestamp)}</span>
+                ${msg.type === 'sent' ? `<span class="message-status">${statusIcon}</span>` : ''}
+            </div>
+        </div>
+    `;
 
-    if (status === "read") {
-        tick.textContent = "✓✓";
-        tick.className = "tick blue";
-    }
+    return messageDiv;
+}
 
-    if (status === "failed") {
-        tick.textContent = "❗";
-        tick.className = "tick text-red-500 cursor-pointer";
+function getStatusIcon(status) {
+    switch(status) {
+        case 'sent': return '<span class="status-sent">✓</span>';
+        case 'delivered': return '<span class="status-delivered">✓✓</span>';
+        case 'read': return '<span class="status-read">✓✓</span>';
+        case 'failed': return '<span class="status-failed">❌</span>';
+        default: return '';
     }
 }
 
-//typing indicator
-function showTypingIndicator() {
-    const el = document.getElementById("typing-indicator");
-    el.classList.remove("hidden");
+// ==================== MESSAGING ====================
+async function sendMessage() {
+    const input = document.getElementById('messageInput');
+    const message = input.value.trim();
 
-    clearTimeout(window.typingHideTimer);
-    window.typingHideTimer = setTimeout(() => {
-        hideTypingIndicator();
-    }, 3000);
-}
+    if (!message || !currentRecipient) {
+        return;
+    }
 
-function hideTypingIndicator() {
-    document.getElementById("typing-indicator").classList.add("hidden");
-}
+    const messageId = crypto.randomUUID();
+    const timestamp = Date.now();
 
-// retry message
-async function retryMessage(bubble) {
-    const messageId = bubble.dataset.messageId;
-    const text = bubble.querySelector(".message-text").textContent;
-
-    // Reset status to "sent"
-    bubble.dataset.status = "sent";
-    updateBubbleStatus(bubble);
+    if (!websocket || websocket.readyState !== WebSocket.OPEN) {
+        addMessageToUI(message, 'sent', timestamp, messageId, 'failed');
+        saveToHistory(currentRecipient, message, 'sent', timestamp, messageId, 'failed');
+        return;
+    }
 
     try {
         const recipientContact = contacts.find(c => c.username === currentRecipient);
-        if (!recipientContact) return;
+        if (!recipientContact) {
+            alert('Recipient not found');
+            return;
+        }
 
         const encrypted = await CryptoManager.encryptMessage(
-            text,
+            message,
             recipientContact.public_key,
             userKeys.privateKey
         );
@@ -822,96 +576,346 @@ async function retryMessage(bubble) {
         });
 
         websocket.send(JSON.stringify({
-            type: "message",
+            type: 'message',
             from: currentUser,
             to: currentRecipient,
             payload: payload,
             message_id: messageId
         }));
 
-    } catch (err) {
-        console.error("Retry failed:", err);
-        bubble.dataset.status = "failed";
-        updateBubbleStatus(bubble);
+        addMessageToUI(message, 'sent', timestamp, messageId, 'sent');
+        saveToHistory(currentRecipient, message, 'sent', timestamp, messageId, 'sent');
+
+        input.value = '';
+        input.style.height = 'auto';
+
+    } catch (error) {
+        console.error('Error sending message:', error);
+        addMessageToUI(message, 'sent', timestamp, messageId, 'failed');
+        saveToHistory(currentRecipient, message, 'sent', timestamp, messageId, 'failed');
     }
 }
 
-// update history entries
-function updateHistoryMessage(recipient, timestamp, newText) {
-    if (!chatHistory[recipient]) return;
+function addMessageToUI(text, type, timestamp, messageId, status) {
+    const messagesArea = document.getElementById('messagesArea');
+    const msgDate = formatDate(timestamp);
 
-    const entry = chatHistory[recipient].find(m => m.timestamp === timestamp);
+    // Check if we need a date divider
+    const lastDivider = messagesArea.querySelector('.date-divider:last-of-type');
+    const lastDividerText = lastDivider ? lastDivider.querySelector('span').textContent : null;
+
+    if (msgDate !== lastDividerText) {
+        const dateDivider = document.createElement('div');
+        dateDivider.className = 'date-divider';
+        dateDivider.innerHTML = `<span>${msgDate}</span>`;
+        messagesArea.appendChild(dateDivider);
+    }
+
+    const msgEl = createMessageElement({ text, type, timestamp, messageId, status });
+    messagesArea.appendChild(msgEl);
+    messagesArea.scrollTop = messagesArea.scrollHeight;
+}
+
+function saveToHistory(username, text, type, timestamp, messageId, status) {
+    if (!chatHistory[username]) {
+        chatHistory[username] = [];
+    }
+
+    chatHistory[username].push({ text, type, timestamp, messageId, status });
+
+    // Update user list if not in chat with this user
+    if (currentRecipient !== username) {
+        renderUsersList();
+    }
+}
+
+async function handleIncomingMessage(data) {
+    try {
+        const payload = JSON.parse(data.payload);
+        const serverTimestamp = new Date(data.timestamp).getTime();
+
+        // If not in chat with sender, increment unread and store
+        if (data.from !== currentRecipient) {
+            if (!unreadCounts[data.from]) unreadCounts[data.from] = 0;
+            unreadCounts[data.from]++;
+            renderUsersList();
+
+            const encryptedPreview = payload.ciphertext.slice(0, 30) + '...';
+            saveToHistory(data.from, encryptedPreview, 'received', serverTimestamp, data.message_id, null);
+
+            // Decrypt in background
+            setTimeout(async () => {
+                try {
+                    const decrypted = await CryptoManager.decryptMessage(
+                        payload.ciphertext,
+                        payload.nonce,
+                        payload.sender_public_key,
+                        userKeys.privateKey
+                    );
+                    updateHistoryMessage(data.from, serverTimestamp, decrypted);
+                    renderUsersList();
+                } catch (e) {
+                    console.error('Decryption failed:', e);
+                }
+            }, 100);
+
+            return;
+        }
+
+        // Show encrypted preview
+        const encryptedPreview = payload.ciphertext.slice(0, 30) + '...';
+        addMessageToUI(encryptedPreview, 'received', serverTimestamp, data.message_id, null);
+        saveToHistory(data.from, encryptedPreview, 'received', serverTimestamp, data.message_id, null);
+
+        // Decrypt and update
+        setTimeout(async () => {
+            try {
+                const decrypted = await CryptoManager.decryptMessage(
+                    payload.ciphertext,
+                    payload.nonce,
+                    payload.sender_public_key,
+                    userKeys.privateKey
+                );
+
+                updateMessageInUI(serverTimestamp, decrypted);
+                updateHistoryMessage(data.from, serverTimestamp, decrypted);
+            } catch (e) {
+                console.error('Decryption failed:', e);
+                updateMessageInUI(serverTimestamp, '[Decryption failed]');
+            }
+        }, 300);
+
+    } catch (error) {
+        console.error('Error handling message:', error);
+    }
+}
+
+async function processPendingMessage(msg) {
+    try {
+        const payload = JSON.parse(msg.payload);
+        const serverTimestamp = new Date(msg.timestamp).getTime();
+
+        const encryptedPreview = payload.ciphertext.slice(0, 30) + '...';
+        addMessageToUI(encryptedPreview, 'received', serverTimestamp, msg.message_id, null);
+        saveToHistory(msg.from, encryptedPreview, 'received', serverTimestamp, msg.message_id, null);
+
+        setTimeout(async () => {
+            try {
+                const decrypted = await CryptoManager.decryptMessage(
+                    payload.ciphertext,
+                    payload.nonce,
+                    payload.sender_public_key,
+                    userKeys.privateKey
+                );
+
+                updateMessageInUI(serverTimestamp, decrypted);
+                updateHistoryMessage(msg.from, serverTimestamp, decrypted);
+            } catch (e) {
+                console.error('Decryption failed:', e);
+            }
+        }, 300);
+
+    } catch (error) {
+        console.error('Error processing pending message:', error);
+    }
+}
+
+function updateMessageInUI(timestamp, newText) {
+    const messages = document.querySelectorAll('.message');
+    messages.forEach(msg => {
+        const textEl = msg.querySelector('.message-text');
+        const timeEl = msg.querySelector('.message-footer span');
+
+        if (timeEl && formatTime(timestamp) === timeEl.textContent.trim()) {
+            textEl.textContent = newText;
+            textEl.classList.remove('encrypted');
+        }
+    });
+}
+
+function updateHistoryMessage(username, timestamp, newText) {
+    if (!chatHistory[username]) return;
+
+    const entry = chatHistory[username].find(m => m.timestamp === timestamp);
     if (entry) {
         entry.text = newText;
     }
 }
 
-// add msg badge visibility
-function updateContactUnreadBadge(username) {
-    const badge = document.getElementById(`badge-${username}`);
-    if (!badge) return;
+function updateMessageStatus(messageId, status) {
+    const messageEl = document.querySelector(`[data-message-id="${messageId}"]`);
+    if (messageEl) {
+        const statusEl = messageEl.querySelector('.message-status');
+        if (statusEl) {
+            statusEl.innerHTML = getStatusIcon(status);
+        }
+    }
 
-    const count = unreadCounts[username] || 0;
-
-    if (count > 0) {
-        badge.textContent = count;
-        badge.classList.remove("hidden");
-    } else {
-        badge.classList.add("hidden");
+    // Update in history
+    for (const username in chatHistory) {
+        const msg = chatHistory[username].find(m => m.messageId === messageId);
+        if (msg) {
+            msg.status = status;
+            break;
+        }
     }
 }
 
-// ==================== EVENT LISTENERS ====================
+function markMessagesAsRead(fromUser) {
+    if (currentRecipient !== fromUser) return;
+
+    const messages = document.querySelectorAll('.message.sent');
+    messages.forEach(msg => {
+        const statusEl = msg.querySelector('.message-status');
+        if (statusEl) {
+            statusEl.innerHTML = getStatusIcon('read');
+        }
+    });
+
+    // Update history
+    if (chatHistory[fromUser]) {
+        chatHistory[fromUser].forEach(msg => {
+            if (msg.type === 'sent') {
+                msg.status = 'read';
+            }
+        });
+    }
+}
+
+// ==================== TYPING INDICATOR ====================
+function handleTyping() {
+    if (!currentRecipient || !websocket || websocket.readyState !== WebSocket.OPEN) return;
+
+    // Auto-resize textarea
+    const input = document.getElementById('messageInput');
+    input.style.height = 'auto';
+    input.style.height = input.scrollHeight + 'px';
+
+    clearTimeout(typingTimeout);
+
+    websocket.send(JSON.stringify({
+        type: 'typing',
+        from: currentUser,
+        to: currentRecipient
+    }));
+
+    typingTimeout = setTimeout(() => {
+        // Stop typing
+    }, 3000);
+}
+
+function showTypingIndicator(fromUser) {
+    if (currentRecipient !== fromUser) return;
+
+    const indicator = document.getElementById('typingIndicator');
+    const userSpan = document.getElementById('typingUser');
+
+    userSpan.textContent = fromUser;
+    indicator.classList.add('show');
+
+    clearTimeout(window.typingHideTimer);
+    window.typingHideTimer = setTimeout(() => {
+        hideTypingIndicator();
+    }, 3000);
+}
+
+function hideTypingIndicator() {
+    document.getElementById('typingIndicator').classList.remove('show');
+}
+
+function handleMessageKeydown(event) {
+    if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        sendMessage();
+    }
+}
+
+// ==================== INITIALIZATION ====================
 document.addEventListener('DOMContentLoaded', () => {
-    // Auth screen event listeners
-    document.getElementById('login-btn').addEventListener('click', login);
-    document.getElementById('register-btn').addEventListener('click', register);
-    document.getElementById('show-register-link').addEventListener('click', (e) => {
-        e.preventDefault();
-        showRegister();
-    });
-    document.getElementById('show-login-link').addEventListener('click', (e) => {
-        e.preventDefault();
-        showLogin();
-    });
+    console.log('SecureChat E2EE Messenger Loaded');
 
-    // Login on Enter key
-    document.getElementById('login-password').addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') login();
-    });
+    // ===== AUTH SCREEN EVENT LISTENERS =====
 
-    // Register on Enter key
-    document.getElementById('register-confirm').addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') register();
+    // Tab switching
+    document.getElementById('loginTab').addEventListener('click', () => switchTab('login'));
+    document.getElementById('registerTab').addEventListener('click', () => switchTab('register'));
+
+    // Login button
+    document.getElementById('loginBtn').addEventListener('click', handleLogin);
+
+    // Register button
+    document.getElementById('registerBtn').addEventListener('click', handleRegister);
+
+    // Enter key for login
+    document.getElementById('loginPassword').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') handleLogin();
     });
 
-    // Messenger screen event listeners
-    document.getElementById('logout-btn').addEventListener('click', logout);
-    document.getElementById('change-password-btn').addEventListener('click', showChangePassword);
-    document.getElementById('send-message-btn').addEventListener('click', sendMessage);
-    document.getElementById('message-input').addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') sendMessage();
+    // Enter key for register
+    document.getElementById('registerConfirm').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') handleRegister();
     });
 
-    // Password change modal event listeners
-    document.getElementById('update-password-btn').addEventListener('click', changePassword);
-    document.getElementById('cancel-password-btn').addEventListener('click', hideChangePassword);
+    // ===== USER LIST EVENT LISTENERS =====
 
-    //end typing events
-    let typingTimeout;
+    // Settings button
+    document.getElementById('settingsBtn').addEventListener('click', toggleSettings);
 
-    document.getElementById("message-input").addEventListener("input", () => {
-        if (!currentRecipient || !websocket || websocket.readyState !== WebSocket.OPEN) return;
+    // Settings menu items
+    document.getElementById('changePasswordMenuBtn').addEventListener('click', showChangePasswordModal);
+    document.getElementById('logoutMenuBtn').addEventListener('click', handleLogout);
 
-        websocket.send(JSON.stringify({
-            type: "typing",
-            from: currentUser,
-            to: currentRecipient
-        }));
+    // Search input
+    document.getElementById('userSearch').addEventListener('input', filterUsers);
 
-        clearTimeout(typingTimeout);
-        typingTimeout = setTimeout(() => {
-            hideTypingIndicator();
-        }, 3000);
+    // ===== CHAT PAGE EVENT LISTENERS =====
+
+    // Back button
+    document.getElementById('backBtn').addEventListener('click', backToUserList);
+
+    // Send button
+    document.getElementById('sendBtn').addEventListener('click', sendMessage);
+
+    // Message input
+    const messageInput = document.getElementById('messageInput');
+
+    messageInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' && !event.shiftKey) {
+            event.preventDefault();
+            sendMessage();
+        }
     });
+
+    messageInput.addEventListener('input', () => {
+        // Auto-resize textarea
+        messageInput.style.height = 'auto';
+        messageInput.style.height = messageInput.scrollHeight + 'px';
+
+        // Handle typing indicator
+        handleTyping();
+    });
+
+    // ===== PASSWORD MODAL EVENT LISTENERS =====
+
+    // Update password button
+    document.getElementById('updatePasswordBtn').addEventListener('click', handlePasswordChange);
+
+    // Cancel button
+    document.getElementById('cancelPasswordBtn').addEventListener('click', hidePasswordModal);
+
+    // Close modal on outside click
+    document.getElementById('passwordModal').addEventListener('click', (e) => {
+        if (e.target.id === 'passwordModal') {
+            hidePasswordModal();
+        }
+    });
+
+    // ===== MOBILE VIEWPORT HEIGHT =====
+    function setVH() {
+        let vh = window.innerHeight * 0.01;
+        document.documentElement.style.setProperty('--vh', `${vh}px`);
+    }
+
+    setVH();
+    window.addEventListener('resize', setVH);
 });

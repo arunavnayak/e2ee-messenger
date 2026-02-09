@@ -3,214 +3,826 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>E2EE Secure Messenger</title>
-
-    <!-- Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
-
+    <title>SecureChat - End-to-End Encrypted Messenger</title>
     <style>
-        /*smooth fade transition*/
-        .fade-in {
-            opacity: 0;
-            transition: opacity 0.4s ease;
-        }
-        .fade-in.show {
-            opacity: 1;
-        }
-
-        .fade-out {
-            opacity: 0;
-            transition: opacity 0.3s ease;
+        :root {
+            --primary-color: #667eea;
+            --primary-dark: #764ba2;
+            --bg-light: #f0f2f5;
+            --text-dark: #333;
+            --text-gray: #65676b;
+            --border-color: #e1e8ed;
+            --sent-bg: #667eea;
+            --received-bg: #ffffff;
+            --vh: 1vh;
         }
 
-        /* Chat container */
-        #messages-container {
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: var(--bg-light);
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* ===== LOGIN PAGE ===== */
+        .login-container {
             display: flex;
             flex-direction: column;
-            gap: 12px;
-            padding: 16px;
-            overflow-y: auto;
-            scrollbar-width: none;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
+            padding: 20px;
         }
-        #messages-container::-webkit-scrollbar {
+
+        .login-box {
+            background: white;
+            padding: 40px 30px;
+            border-radius: 20px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            width: 100%;
+            max-width: 400px;
+        }
+
+        .login-box h1 {
+            text-align: center;
+            color: var(--primary-color);
+            margin-bottom: 10px;
+            font-size: 32px;
+        }
+
+        .login-box .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+
+        .tab-switcher {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 25px;
+        }
+
+        .tab-btn {
+            flex: 1;
+            padding: 10px;
+            background: #f5f6f7;
+            border: none;
+            border-radius: 10px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .tab-btn.active {
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
+            color: white;
+        }
+
+        .form-container {
             display: none;
         }
 
-        /* Date separator */
-        .date-separator {
-            text-align: center;
-            color: #9ca3af;
-            font-size: 0.8rem;
-            margin: 12px 0;
+        .form-container.active {
+            display: block;
         }
 
-        /* Message bubble base */
+        .input-group {
+            margin-bottom: 20px;
+        }
+
+        .input-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: var(--text-dark);
+            font-weight: 500;
+            font-size: 14px;
+        }
+
+        .input-group input {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid var(--border-color);
+            border-radius: 10px;
+            font-size: 16px;
+            transition: border 0.3s;
+        }
+
+        .input-group input:focus {
+            outline: none;
+            border-color: var(--primary-color);
+        }
+
+        .submit-btn {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        .submit-btn:hover {
+            transform: translateY(-2px);
+        }
+
+        .submit-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .status-message {
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 8px;
+            text-align: center;
+            font-size: 14px;
+            display: none;
+        }
+
+        .status-message.error {
+            background: #fee;
+            color: #c00;
+            display: block;
+        }
+
+        .status-message.success {
+            background: #efe;
+            color: #080;
+            display: block;
+        }
+
+        /* ===== MAIN CHAT CONTAINER ===== */
+        .chat-container {
+            display: none;
+            height: 100vh;
+            max-width: 480px;
+            margin: 0 auto;
+            background: white;
+            position: relative;
+        }
+
+        /* ===== USER LIST PAGE ===== */
+        .user-list-page {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        .header {
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
+            color: white;
+            padding: 15px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .header h2 {
+            font-size: 20px;
+        }
+
+        .header-icons {
+            display: flex;
+            gap: 15px;
+        }
+
+        .header-icons button {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 20px;
+            cursor: pointer;
+            padding: 5px;
+        }
+
+        .search-bar {
+            padding: 10px 15px;
+            background: #f0f2f5;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .search-bar input {
+            width: 100%;
+            padding: 10px 15px;
+            border: none;
+            border-radius: 20px;
+            background: white;
+            font-size: 15px;
+        }
+
+        .search-bar input:focus {
+            outline: none;
+        }
+
+        .users-list {
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        .user-item {
+            display: flex;
+            align-items: center;
+            padding: 12px 15px;
+            border-bottom: 1px solid #f0f2f5;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .user-item:hover {
+            background: #f5f6f7;
+        }
+
+        .user-avatar {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            font-size: 18px;
+            margin-right: 12px;
+            flex-shrink: 0;
+        }
+
+        .user-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .user-name {
+            font-weight: 600;
+            font-size: 16px;
+            margin-bottom: 3px;
+        }
+
+        .user-last-message {
+            color: var(--text-gray);
+            font-size: 14px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .user-meta {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+        }
+
+        .message-time {
+            font-size: 12px;
+            color: var(--text-gray);
+            margin-bottom: 5px;
+        }
+
+        .unread-badge {
+            background: var(--primary-color);
+            color: white;
+            border-radius: 10px;
+            padding: 2px 8px;
+            font-size: 12px;
+            font-weight: 600;
+            min-width: 20px;
+            text-align: center;
+        }
+
+        .encryption-indicator {
+            font-size: 11px;
+            color: #888;
+            margin-top: 2px;
+        }
+
+        /* ===== CHAT PAGE ===== */
+        .chat-page {
+            display: none;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        .chat-header {
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
+            color: white;
+            padding: 12px 15px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .chat-header-left {
+            display: flex;
+            align-items: center;
+            flex: 1;
+            min-width: 0;
+        }
+
+        .back-btn {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+            margin-right: 10px;
+            padding: 5px;
+        }
+
+        .chat-user-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.3);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            margin-right: 10px;
+            flex-shrink: 0;
+        }
+
+        .chat-user-info h3 {
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .chat-user-status {
+            font-size: 12px;
+            opacity: 0.9;
+        }
+
+        .chat-header-right button {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 20px;
+            cursor: pointer;
+            padding: 5px;
+        }
+
+        .messages-area {
+            flex: 1;
+            overflow-y: auto;
+            padding: 15px;
+            background: #e5ddd5;
+            background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect fill="%23e5ddd5" width="100" height="100"/><circle fill="%23d1c7bb" cx="50" cy="50" r="1" opacity="0.3"/></svg>');
+        }
+
+        .date-divider {
+            text-align: center;
+            margin: 20px 0;
+            position: relative;
+        }
+
+        .date-divider span {
+            background: rgba(255,255,255,0.9);
+            padding: 5px 12px;
+            border-radius: 7px;
+            font-size: 12px;
+            color: #667;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        }
+
+        .message {
+            display: flex;
+            margin-bottom: 12px;
+            animation: slideIn 0.2s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .message.sent {
+            justify-content: flex-end;
+        }
+
+        .message.received {
+            justify-content: flex-start;
+        }
+
         .message-bubble {
-            max-width: 70%;
-            padding: 10px 14px;
-            border-radius: 16px;
+            max-width: 75%;
+            padding: 8px 12px;
+            border-radius: 8px;
             position: relative;
             word-wrap: break-word;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.25);
         }
 
-        /* Sent (right side) */
-        .message-bubble.sent {
-            align-self: flex-end;
-            background: #3b82f6;
+        .message.sent .message-bubble {
+            background: var(--sent-bg);
             color: white;
-            border-radius: 16px 16px 4px 16px;
+            border-radius: 8px 8px 0 8px;
         }
 
-        /* Received (left side) */
-        .message-bubble.received {
-            align-self: flex-start;
-            background: #e5e7eb;
-            color: #111827;
-            border-radius: 16px 16px 16px 4px;
+        .message.received .message-bubble {
+            background: white;
+            color: var(--text-dark);
+            border-radius: 8px 8px 8px 0;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
         }
 
-        /* Timestamp inside bubble */
-        .message-time {
-            font-size: 0.7rem;
+        .message-text {
+            margin-bottom: 2px;
+            font-size: 15px;
+            line-height: 1.4;
+        }
+
+        .message-text.encrypted {
+            font-style: italic;
             opacity: 0.7;
-            margin-top: 6px;
-            text-align: right;
         }
 
-        /* tick color*/
-        /* Tick colors */
-        .tick {
-            font-size: 0.75rem;
-            margin-left: 4px;
+        .message-footer {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 4px;
+            font-size: 11px;
+            margin-top: 2px;
         }
 
-        .tick.grey {
-            color: #9ca3af; /* grey */
+        .message.sent .message-footer {
+            color: rgba(255,255,255,0.8);
         }
 
-        .tick.blue {
-            color: #3b82f6; /* blue */
+        .message.received .message-footer {
+            color: #667;
+        }
+
+        .message-status {
+            font-size: 14px;
+        }
+
+        .status-sent { color: rgba(255,255,255,0.6); }
+        .status-delivered { color: rgba(255,255,255,0.8); }
+        .status-read { color: #4fc3f7; }
+        .status-failed { color: #f44336; }
+
+        .typing-indicator {
+            display: none;
+            padding: 12px 15px;
+            background: rgba(255,255,255,0.9);
+            font-size: 14px;
+            color: #667;
+            font-style: italic;
+        }
+
+        .typing-indicator.show {
+            display: block;
+        }
+
+        .input-area {
+            padding: 10px 15px;
+            background: #f0f2f5;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .input-area button {
+            background: none;
+            border: none;
+            color: var(--text-gray);
+            font-size: 22px;
+            cursor: pointer;
+            padding: 5px;
+        }
+
+        .message-input {
+            flex: 1;
+            padding: 10px 15px;
+            border: none;
+            border-radius: 20px;
+            background: white;
+            font-size: 15px;
+            resize: none;
+            max-height: 100px;
+        }
+
+        .message-input:focus {
+            outline: none;
+        }
+
+        .send-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            color: white;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.2s;
+        }
+
+        .send-btn:hover {
+            transform: scale(1.1);
+        }
+
+        .send-btn:active {
+            transform: scale(0.95);
+        }
+
+        /* ===== SETTINGS MENU ===== */
+        .settings-menu {
+            position: absolute;
+            top: 60px;
+            right: 15px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            overflow: hidden;
+            opacity: 0;
+            visibility: hidden;
+            transform: translateY(-10px);
+            transition: all 0.2s;
+            z-index: 1000;
+        }
+
+        .settings-menu.show {
+            opacity: 1;
+            visibility: visible;
+            transform: translateY(0);
+        }
+
+        .settings-menu button {
+            display: block;
+            width: 100%;
+            padding: 12px 20px;
+            background: none;
+            border: none;
+            text-align: left;
+            font-size: 15px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .settings-menu button:hover {
+            background: #f5f6f7;
+        }
+
+        /* ===== PASSWORD CHANGE MODAL ===== */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 2000;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .modal-overlay.show {
+            display: flex;
+        }
+
+        .modal-content {
+            background: white;
+            padding: 30px;
+            border-radius: 20px;
+            width: 100%;
+            max-width: 400px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+        }
+
+        .modal-content h2 {
+            margin-bottom: 20px;
+            color: var(--text-dark);
+        }
+
+        .modal-buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        .modal-buttons button {
+            flex: 1;
+            padding: 12px;
+            border: none;
+            border-radius: 10px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
+            color: white;
+        }
+
+        .btn-secondary {
+            background: #e1e8ed;
+            color: var(--text-dark);
+        }
+
+        /* ===== MOBILE RESPONSIVENESS ===== */
+        @media (max-width: 480px) {
+            .chat-container {
+                max-width: 100%;
+            }
+
+            .message-bubble {
+                max-width: 85%;
+            }
+        }
+
+        /* ===== LOADING SPINNER ===== */
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Hide scrollbar for chat messages */
+        .messages-area::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .messages-area::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .messages-area::-webkit-scrollbar-thumb {
+            background: rgba(0,0,0,0.2);
+            border-radius: 3px;
         }
     </style>
 </head>
-<body class="bg-gray-900 text-white">
-<!-- Authentication Screen -->
-<div id="auth-screen" class="min-h-screen flex items-center justify-center p-4">
-    <div class="bg-gray-800 rounded-lg shadow-xl p-8 w-full max-w-md">
-        <div class="text-center mb-8">
-            <h1 class="text-3xl font-bold mb-2">🔐 E2EE Messenger</h1>
-            <p class="text-gray-400">End-to-End Encrypted Communication</p>
+<body>
+<!-- Login/Register Screen -->
+<div id="authScreen" class="login-container">
+    <div class="login-box">
+        <h1>🔐 SecureChat</h1>
+        <p class="subtitle">End-to-End Encrypted Messaging</p>
+
+        <div class="tab-switcher">
+            <button class="tab-btn active" id="loginTab">Login</button>
+            <button class="tab-btn" id="registerTab">Register</button>
         </div>
 
         <!-- Login Form -->
-        <div id="login-form">
-            <h2 class="text-xl font-semibold mb-4">Login</h2>
-            <input type="text" id="login-username" placeholder="Username"
-                   class="w-full p-3 mb-3 bg-gray-700 rounded border border-gray-600 focus:border-blue-500 focus:outline-none">
-            <input type="password" id="login-password" placeholder="Password"
-                   class="w-full p-3 mb-4 bg-gray-700 rounded border border-gray-600 focus:border-blue-500 focus:outline-none">
-            <button id="login-btn"
-                    class="w-full bg-blue-600 hover:bg-blue-700 p-3 rounded font-semibold transition">
+        <div id="loginForm" class="form-container active">
+            <div class="input-group">
+                <label>Username</label>
+                <input type="text" id="loginUsername" placeholder="Enter your username" autocomplete="username">
+            </div>
+            <div class="input-group">
+                <label>Password</label>
+                <input type="password" id="loginPassword" placeholder="Enter your password" autocomplete="current-password">
+            </div>
+            <button class="submit-btn" id="loginBtn">
                 Login
             </button>
-            <p class="text-center mt-4 text-gray-400">
-                Don't have an account?
-                <a href="#" id="show-register-link" class="text-blue-400 hover:underline">Register</a>
-            </p>
         </div>
 
         <!-- Register Form -->
-        <div id="register-form" class="hidden">
-            <h2 class="text-xl font-semibold mb-4">Register</h2>
-            <input type="text" id="register-username" placeholder="Username"
-                   class="w-full p-3 mb-3 bg-gray-700 rounded border border-gray-600 focus:border-blue-500 focus:outline-none">
-            <input type="password" id="register-password" placeholder="Password"
-                   class="w-full p-3 mb-3 bg-gray-700 rounded border border-gray-600 focus:border-blue-500 focus:outline-none">
-            <input type="password" id="register-confirm" placeholder="Confirm Password"
-                   class="w-full p-3 mb-4 bg-gray-700 rounded border border-gray-600 focus:border-blue-500 focus:outline-none">
-            <button id="register-btn"
-                    class="w-full bg-green-600 hover:bg-green-700 p-3 rounded font-semibold transition">
+        <div id="registerForm" class="form-container">
+            <div class="input-group">
+                <label>Username</label>
+                <input type="text" id="registerUsername" placeholder="Choose a username" autocomplete="username">
+            </div>
+            <div class="input-group">
+                <label>Password</label>
+                <input type="password" id="registerPassword" placeholder="Create a password (min 12 characters)" autocomplete="new-password">
+            </div>
+            <div class="input-group">
+                <label>Confirm Password</label>
+                <input type="password" id="registerConfirm" placeholder="Confirm your password" autocomplete="new-password">
+            </div>
+            <button class="submit-btn" id="registerBtn">
                 Create Account
             </button>
-            <p class="text-center mt-4 text-gray-400">
-                Already have an account?
-                <a href="#" id="show-login-link" class="text-blue-400 hover:underline">Login</a>
-            </p>
         </div>
 
-        <div id="auth-status" class="mt-4 text-center text-sm"></div>
+        <div id="authStatus" class="status-message"></div>
     </div>
 </div>
 
-<!-- Messenger Screen -->
-<div id="messenger-screen" class="hidden min-h-screen flex">
-    <!-- Sidebar -->
-    <div class="w-80 bg-gray-800 border-r border-gray-700 flex flex-col">
-        <div class="p-4 border-b border-gray-700">
-            <div class="flex items-center justify-between mb-4">
-                <h2 class="text-xl font-bold">Contacts</h2>
-                <button id="change-password-btn"
-                        class="text-sm bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded">
-                    🔑 Change Password
-                </button>
+<!-- Main Chat Container -->
+<div id="chatContainer" class="chat-container">
+    <!-- User List Page -->
+    <div id="userListPage" class="user-list-page">
+        <div class="header">
+            <h2>SecureChat</h2>
+            <div class="header-icons">
+                <button id="settingsBtn">⚙️</button>
             </div>
-            <p class="text-sm text-gray-400">Logged in as: <span id="current-user" class="text-blue-400"></span></p>
-            <button id="logout-btn"
-                    class="mt-2 w-full bg-red-600 hover:bg-red-700 p-2 rounded text-sm">
-                Logout
-            </button>
         </div>
-        <div id="contacts-list" class="flex-1 overflow-y-auto p-4">
-            <!-- Contacts will be populated here -->
+
+        <!-- Settings Menu -->
+        <div id="settingsMenu" class="settings-menu">
+            <button id="changePasswordMenuBtn">🔒 Change Password</button>
+            <button id="logoutMenuBtn">🚪 Logout</button>
+        </div>
+
+        <div class="search-bar">
+            <input type="text" id="userSearch" placeholder="Search contacts...">
+        </div>
+
+        <div id="usersList" class="users-list">
+            <!-- Users will be populated here -->
         </div>
     </div>
 
-    <!-- Chat Area -->
-    <div class="flex-1 flex flex-col">
-        <div class="bg-gray-800 p-4 border-b border-gray-700">
-            <h2 id="chat-with" class="text-xl font-semibold">Select a contact</h2>
-            <div id="typing-indicator" class="text-gray-400 text-sm mt-1 hidden">
-                typing…
+    <!-- Chat Page -->
+    <div id="chatPage" class="chat-page">
+        <div class="chat-header">
+            <div class="chat-header-left">
+                <button class="back-btn" id="backBtn">←</button>
+                <div class="chat-user-avatar" id="chatUserAvatar"></div>
+                <div class="chat-user-info">
+                    <h3 id="chatUserName"></h3>
+                    <div class="chat-user-status" id="chatUserStatus">
+                        🔐 End-to-end encrypted
+                    </div>
+                </div>
+            </div>
+            <div class="chat-header-right">
+                <!-- Future: video call, voice call, etc. -->
             </div>
         </div>
-        <div id="messages-container" class="flex-1 overflow-y-auto p-4 space-y-3">
-            <!-- Messages will appear here -->
+
+        <div id="typingIndicator" class="typing-indicator">
+            <span id="typingUser"></span> is typing...
         </div>
-        <div class="p-4 bg-gray-800 border-t border-gray-700">
-            <div class="flex gap-2">
-                <input type="text" id="message-input" placeholder="Type a message..."
-                       class="flex-1 p-3 bg-gray-700 rounded border border-gray-600 focus:border-blue-500 focus:outline-none">
-                <button id="send-message-btn"
-                        class="bg-blue-600 hover:bg-blue-700 px-6 py-3 rounded font-semibold transition">
-                    Send
-                </button>
-            </div>
+
+        <div id="messagesArea" class="messages-area">
+            <!-- Messages will be populated here -->
+        </div>
+
+        <div class="input-area">
+                <textarea
+                        id="messageInput"
+                        class="message-input"
+                        placeholder="Message"
+                        rows="1"
+                ></textarea>
+            <button class="send-btn" id="sendBtn">➤</button>
         </div>
     </div>
 </div>
 
 <!-- Change Password Modal -->
-<div id="change-password-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4">
-    <div class="bg-gray-800 rounded-lg p-6 w-full max-w-md">
-        <h2 class="text-xl font-bold mb-4">Change Password</h2>
-        <input type="password" id="old-password" placeholder="Current Password"
-               class="w-full p-3 mb-3 bg-gray-700 rounded border border-gray-600 focus:border-blue-500 focus:outline-none">
-        <input type="password" id="new-password" placeholder="New Password"
-               class="w-full p-3 mb-3 bg-gray-700 rounded border border-gray-600 focus:border-blue-500 focus:outline-none">
-        <input type="password" id="confirm-new-password" placeholder="Confirm New Password"
-               class="w-full p-3 mb-4 bg-gray-700 rounded border border-gray-600 focus:border-blue-500 focus:outline-none">
-        <div class="flex gap-2">
-            <button id="update-password-btn"
-                    class="flex-1 bg-green-600 hover:bg-green-700 p-3 rounded font-semibold">
-                Update Password
-            </button>
-            <button id="cancel-password-btn"
-                    class="flex-1 bg-gray-600 hover:bg-gray-700 p-3 rounded font-semibold">
-                Cancel
-            </button>
+<div id="passwordModal" class="modal-overlay">
+    <div class="modal-content">
+        <h2>Change Password</h2>
+        <div class="input-group">
+            <label>Current Password</label>
+            <input type="password" id="oldPassword" placeholder="Enter current password">
         </div>
-        <div id="password-change-status" class="mt-4 text-center text-sm"></div>
+        <div class="input-group">
+            <label>New Password</label>
+            <input type="password" id="newPassword" placeholder="Enter new password (min 12 characters)">
+        </div>
+        <div class="input-group">
+            <label>Confirm New Password</label>
+            <input type="password" id="confirmNewPassword" placeholder="Confirm new password">
+        </div>
+        <div id="passwordStatus" class="status-message"></div>
+        <div class="modal-buttons">
+            <button class="btn-secondary" id="cancelPasswordBtn">Cancel</button>
+            <button class="btn-primary" id="updatePasswordBtn">Update</button>
+        </div>
     </div>
 </div>
 
