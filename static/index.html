@@ -303,6 +303,23 @@
             text-align: center;
         }
 
+        .message-time {
+            font-size: 12px;
+            color: var(--text-gray);
+            margin-bottom: 5px;
+        }
+
+        .unread-badge {
+            background: var(--primary-color);
+            color: white;
+            border-radius: 10px;
+            padding: 2px 8px;
+            font-size: 12px;
+            font-weight: 600;
+            min-width: 20px;
+            text-align: center;
+        }
+
         .encryption-indicator {
             font-size: 11px;
             color: #888;
@@ -778,8 +795,15 @@
                 </div>
             </div>
             <div class="chat-header-right">
-                <!-- Future: video call, voice call, etc. -->
+                <button id="chatSettingsBtn">⋮</button>
             </div>
+        </div>
+
+        <!-- Chat Settings Menu -->
+        <div id="chatSettingsMenu" class="settings-menu">
+            <button id="clearChatBtn">🗑️ Clear Chat</button>
+            <button id="muteBtn">🔕 Mute</button>
+            <button id="blockBtn">🚫 Block</button>
         </div>
 
         <div id="typingIndicator" class="typing-indicator">

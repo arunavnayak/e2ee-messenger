@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, Index
+from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, Index
 from sqlalchemy.sql import func
 from database import Base
 
@@ -31,6 +31,7 @@ class PendingMessage(Base):
     to_username = Column(String(32), index=True, nullable=False)
     encrypted_payload = Column(Text, nullable=False)  # E2EE ciphertext
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
+    read = Column(Boolean, default=False, nullable=False)  # Track if message has been read
 
     __table_args__ = (
         Index('idx_pending_to_username', 'to_username'),
@@ -48,4 +49,19 @@ class SessionToken(Base):
 
     __table_args__ = (
         Index('idx_token_hash_expires', 'token_hash', 'expires_at'),
+    )
+
+class UserPreferences(Base):
+    """User preferences for blocking and muting contacts"""
+    __tablename__ = "user_preferences"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(32), index=True, nullable=False)
+    blocked_users = Column(Text, default='[]', nullable=False)  # JSON array of blocked usernames
+    muted_users = Column(Text, default='[]', nullable=False)  # JSON array of muted usernames
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        Index('idx_user_preferences_username', 'username'),
     )

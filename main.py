@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+import json
 import os
 from datetime import datetime, timedelta
 from typing import Dict
@@ -14,7 +15,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 # Local Imports
 from database import engine, get_db, Base, SessionLocal
-from models import User, EncryptedVault, PendingMessage, SessionToken
+from models import User, EncryptedVault, PendingMessage, SessionToken, UserPreferences
 from rate_limiter import RateLimitMiddleware, login_rate_limiter, ws_rate_limiter
 from status import router as status_router
 
@@ -45,6 +46,24 @@ def cleanup_expired_tokens(db: Session):
         SessionToken.expires_at < datetime.utcnow()
     ).delete()
     db.commit()
+
+
+def get_user_preferences(username: str, db: Session) -> UserPreferences:
+    """Get or create user preferences"""
+    prefs = db.query(UserPreferences).filter(UserPreferences.username == username).first()
+    if not prefs:
+        prefs = UserPreferences(username=username, blocked_users='[]', muted_users='[]')
+        db.add(prefs)
+        db.commit()
+        db.refresh(prefs)
+    return prefs
+
+
+def is_user_blocked(blocker: str, blockee: str, db: Session) -> bool:
+    """Check if blockee is blocked by blocker"""
+    prefs = get_user_preferences(blocker, db)
+    blocked_list = json.loads(prefs.blocked_users)
+    return blockee in blocked_list
 
 
 # ==================== WEBSOCKET CONNECTION MANAGER ====================
@@ -148,6 +167,21 @@ class SendMessageRequest(BaseModel):
     encrypted_payload: str
 
 
+class BlockUserRequest(BaseModel):
+    blocker: str
+    blockee: str
+
+
+class MuteUserRequest(BaseModel):
+    muter: str
+    mutee: str
+
+
+class ClearChatRequest(BaseModel):
+    username: str
+    contact: str
+
+
 # ==================== API ENDPOINTS ====================
 
 @app.post("/api/register")
@@ -170,6 +204,10 @@ async def register(req: RegisterRequest, db: Session = Depends(get_db)):
         encrypted_vault_blob=req.encrypted_vault
     )
     db.add(vault)
+
+    # Create default preferences
+    prefs = UserPreferences(username=req.username, blocked_users='[]', muted_users='[]')
+    db.add(prefs)
 
     db.commit()
 
@@ -206,6 +244,7 @@ async def login(req: LoginRequest, request: Request, db: Session = Depends(get_d
 
     vault = db.query(EncryptedVault).filter(EncryptedVault.username == req.username).first()
 
+    # Get pending messages with unread status
     pending = db.query(PendingMessage).filter(
         PendingMessage.to_username == req.username
     ).all()
@@ -214,10 +253,17 @@ async def login(req: LoginRequest, request: Request, db: Session = Depends(get_d
         {
             "from": msg.from_username,
             "payload": msg.encrypted_payload,
-            "timestamp": msg.timestamp.isoformat(timespec="milliseconds") + "Z"
+            "timestamp": msg.timestamp.isoformat(timespec="milliseconds") + "Z",
+            "read": msg.read
         }
         for msg in pending
     ]
+
+    # Calculate unread counts per sender
+    unread_counts = {}
+    for msg in pending:
+        if not msg.read:
+            unread_counts[msg.from_username] = unread_counts.get(msg.from_username, 0) + 1
 
     # Generate session token for WebSocket authentication
     import secrets
@@ -235,49 +281,41 @@ async def login(req: LoginRequest, request: Request, db: Session = Depends(get_d
     # Clean up old expired tokens (do this periodically)
     cleanup_expired_tokens(db)
 
+    # Get user preferences
+    prefs = get_user_preferences(req.username, db)
+
     db.commit()
 
     return {
         "status": "success",
+        "username": req.username,
         "public_key": user.public_key,
-        "encrypted_vault": vault.encrypted_vault_blob if vault else None,
+        "encrypted_vault": vault.encrypted_vault_blob,
         "pending_messages": pending_messages,
-        "session_token": session_token  # Send plaintext token to client (only once)
+        "unread_counts": unread_counts,
+        "session_token": session_token,
+        "blocked_users": json.loads(prefs.blocked_users),
+        "muted_users": json.loads(prefs.muted_users)
     }
 
 
 @app.post("/api/update-vault")
 async def update_vault(req: UpdateVaultRequest, db: Session = Depends(get_db)):
-    """Update vault after password change"""
+    """Update encrypted vault (password change)"""
 
     user = db.query(User).filter(User.username == req.username).first()
 
-    # Use constant-time comparison
     if not user or not constant_time_compare(user.auth_hash, req.old_auth_hash):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     user.auth_hash = req.new_auth_hash
 
     vault = db.query(EncryptedVault).filter(EncryptedVault.username == req.username).first()
-    if vault:
-        vault.encrypted_vault_blob = req.new_encrypted_vault
-        vault.updated_at = datetime.utcnow()
+    vault.encrypted_vault_blob = req.new_encrypted_vault
 
     db.commit()
 
-    return {"status": "success", "message": "Password updated successfully"}
-
-
-@app.get("/api/user/{username}/public-key")
-async def get_public_key(username: str, db: Session = Depends(get_db)):
-    """Retrieve user's public key for E2EE"""
-
-    user = db.query(User).filter(User.username == username.lower()).first()
-
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    return {"username": user.username, "public_key": user.public_key}
+    return {"status": "success", "message": "Vault updated successfully"}
 
 
 @app.get("/api/users")
@@ -301,6 +339,113 @@ async def clear_messages(username: str, db: Session = Depends(get_db)):
     db.commit()
 
     return {"status": "success", "message": "Messages cleared"}
+
+
+@app.post("/api/messages/mark-read")
+async def mark_messages_read(from_username: str, to_username: str, db: Session = Depends(get_db)):
+    """Mark messages from a specific user as read"""
+
+    db.query(PendingMessage).filter(
+        PendingMessage.from_username == from_username,
+        PendingMessage.to_username == to_username
+    ).update({"read": True})
+
+    db.commit()
+
+    return {"status": "success", "message": "Messages marked as read"}
+
+
+@app.post("/api/chat/clear")
+async def clear_chat(username: str, contact: str, db: Session = Depends(get_db)):
+    """Clear chat history between two users (removes pending messages)"""
+
+    # Clear pending messages from contact to user
+    db.query(PendingMessage).filter(
+        PendingMessage.from_username == contact,
+        PendingMessage.to_username == username
+    ).delete()
+
+    # Clear pending messages from user to contact
+    db.query(PendingMessage).filter(
+        PendingMessage.from_username == username,
+        PendingMessage.to_username == contact
+    ).delete()
+
+    db.commit()
+
+    return {"status": "success", "message": "Chat cleared"}
+
+
+@app.post("/api/user/block")
+async def block_user(req: BlockUserRequest, db: Session = Depends(get_db)):
+    """Block a user"""
+
+    prefs = get_user_preferences(req.blocker, db)
+    blocked_list = json.loads(prefs.blocked_users)
+
+    if req.blockee not in blocked_list:
+        blocked_list.append(req.blockee)
+        prefs.blocked_users = json.dumps(blocked_list)
+        db.commit()
+
+    return {"status": "success", "message": f"User {req.blockee} blocked"}
+
+
+@app.post("/api/user/unblock")
+async def unblock_user(req: BlockUserRequest, db: Session = Depends(get_db)):
+    """Unblock a user"""
+
+    prefs = get_user_preferences(req.blocker, db)
+    blocked_list = json.loads(prefs.blocked_users)
+
+    if req.blockee in blocked_list:
+        blocked_list.remove(req.blockee)
+        prefs.blocked_users = json.dumps(blocked_list)
+        db.commit()
+
+    return {"status": "success", "message": f"User {req.blockee} unblocked"}
+
+
+@app.post("/api/user/mute")
+async def mute_user(req: MuteUserRequest, db: Session = Depends(get_db)):
+    """Mute a user"""
+
+    prefs = get_user_preferences(req.muter, db)
+    muted_list = json.loads(prefs.muted_users)
+
+    if req.mutee not in muted_list:
+        muted_list.append(req.mutee)
+        prefs.muted_users = json.dumps(muted_list)
+        db.commit()
+
+    return {"status": "success", "message": f"User {req.mutee} muted"}
+
+
+@app.post("/api/user/unmute")
+async def unmute_user(req: MuteUserRequest, db: Session = Depends(get_db)):
+    """Unmute a user"""
+
+    prefs = get_user_preferences(req.muter, db)
+    muted_list = json.loads(prefs.muted_users)
+
+    if req.mutee in muted_list:
+        muted_list.remove(req.mutee)
+        prefs.muted_users = json.dumps(muted_list)
+        db.commit()
+
+    return {"status": "success", "message": f"User {req.mutee} unmuted"}
+
+
+@app.get("/api/user/preferences/{username}")
+async def get_preferences(username: str, db: Session = Depends(get_db)):
+    """Get user preferences"""
+
+    prefs = get_user_preferences(username, db)
+
+    return {
+        "blocked_users": json.loads(prefs.blocked_users),
+        "muted_users": json.loads(prefs.muted_users)
+    }
 
 
 # ==================== WEBSOCKET ENDPOINT ====================
@@ -389,6 +534,16 @@ async def websocket_endpoint(websocket: WebSocket, username: str):
                     })
                     continue
 
+                # Check if sender is blocked by recipient
+                if is_user_blocked(to_user, from_user, db):
+                    await websocket.send_json({
+                        "type": "delivery_status",
+                        "status": "blocked",
+                        "message": f"Cannot send message. You are blocked by {to_user}",
+                        "message_id": message_id
+                    })
+                    continue
+
                 delivered = await manager.send_personal_message(
                     {
                         "type": "message",
@@ -405,7 +560,8 @@ async def websocket_endpoint(websocket: WebSocket, username: str):
                         pending_msg = PendingMessage(
                             from_username=from_user,
                             to_username=to_user,
-                            encrypted_payload=encrypted_payload
+                            encrypted_payload=encrypted_payload,
+                            read=False
                         )
                         db.add(pending_msg)
                         db.commit()
@@ -438,6 +594,13 @@ async def websocket_endpoint(websocket: WebSocket, username: str):
                 # Verify sender
                 if from_user != username:
                     continue
+
+                # Mark messages as read in database
+                db.query(PendingMessage).filter(
+                    PendingMessage.from_username == to_user,
+                    PendingMessage.to_username == from_user
+                ).update({"read": True})
+                db.commit()
 
                 await manager.send_personal_message(
                     {

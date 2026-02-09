@@ -11,6 +11,8 @@ let contacts = [];
 let chatHistory = {}; // { username: [ {text, type, timestamp, messageId, status, date} ] }
 let pendingMessagesStore = {};
 let unreadCounts = {};
+let blockedUsers = [];
+let mutedUsers = [];
 let typingTimeout = null;
 
 // ==================== UTILITY FUNCTIONS ====================
@@ -170,6 +172,13 @@ async function handleLogin() {
             sessionToken = data.session_token;
 
             sessionStorage.setItem('encryptedVault', data.encrypted_vault);
+
+            // Store unread counts from server
+            unreadCounts = data.unread_counts || {};
+
+            // Store blocked and muted users
+            blockedUsers = data.blocked_users || [];
+            mutedUsers = data.muted_users || [];
 
             // Store pending messages
             if (data.pending_messages && data.pending_messages.length > 0) {
@@ -457,6 +466,9 @@ async function openChat(username) {
     document.getElementById('chatPage').style.display = 'flex';
     document.getElementById('chatUserAvatar').textContent = getInitials(username);
     document.getElementById('chatUserName').textContent = username;
+
+    // Update chat settings menu state
+    updateChatSettingsMenu();
 
     // Load messages
     const messagesArea = document.getElementById('messagesArea');
@@ -830,6 +842,180 @@ function handleMessageKeydown(event) {
     }
 }
 
+// ==================== CHAT SETTINGS ====================
+
+function toggleChatSettings() {
+    const menu = document.getElementById('chatSettingsMenu');
+    menu.classList.toggle('show');
+
+    // Update button text based on current state
+    updateChatSettingsMenu();
+
+    // Close menu when clicking outside
+    if (menu.classList.contains('show')) {
+        setTimeout(() => {
+            document.addEventListener('click', closeChatSettingsOnClickOutside);
+        }, 0);
+    }
+}
+
+function closeChatSettingsOnClickOutside(event) {
+    const menu = document.getElementById('chatSettingsMenu');
+    const btn = document.getElementById('chatSettingsBtn');
+
+    if (!menu.contains(event.target) && !btn.contains(event.target)) {
+        menu.classList.remove('show');
+        document.removeEventListener('click', closeChatSettingsOnClickOutside);
+    }
+}
+
+function updateChatSettingsMenu() {
+    if (!currentRecipient) return;
+
+    const muteBtn = document.getElementById('muteBtn');
+    const blockBtn = document.getElementById('blockBtn');
+
+    // Update mute button
+    if (mutedUsers.includes(currentRecipient)) {
+        muteBtn.textContent = '🔔 Unmute';
+    } else {
+        muteBtn.textContent = '🔕 Mute';
+    }
+
+    // Update block button
+    if (blockedUsers.includes(currentRecipient)) {
+        blockBtn.textContent = '✅ Unblock';
+    } else {
+        blockBtn.textContent = '🚫 Block';
+    }
+}
+
+async function clearChat() {
+    if (!currentRecipient) return;
+
+    const confirmed = confirm(`Clear all messages with ${currentRecipient}? This cannot be undone.`);
+    if (!confirmed) return;
+
+    try {
+        // Clear from local storage
+        chatHistory[currentRecipient] = [];
+
+        // Clear from server
+        const response = await fetch('/api/chat/clear', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                username: currentUser,
+                contact: currentRecipient
+            })
+        });
+
+        if (response.ok) {
+            // Clear messages UI
+            const messagesArea = document.getElementById('messagesArea');
+            messagesArea.innerHTML = '';
+
+            // Update user list
+            renderUsersList();
+
+            // Close settings menu
+            document.getElementById('chatSettingsMenu').classList.remove('show');
+
+            console.log(`Chat with ${currentRecipient} cleared`);
+        } else {
+            alert('Failed to clear chat on server');
+        }
+    } catch (error) {
+        console.error('Error clearing chat:', error);
+        alert('Error clearing chat');
+    }
+}
+
+async function toggleMute() {
+    if (!currentRecipient) return;
+
+    const isMuted = mutedUsers.includes(currentRecipient);
+
+    try {
+        const endpoint = isMuted ? '/api/user/unmute' : '/api/user/mute';
+
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                muter: currentUser,
+                mutee: currentRecipient
+            })
+        });
+
+        if (response.ok) {
+            if (isMuted) {
+                mutedUsers = mutedUsers.filter(u => u !== currentRecipient);
+                console.log(`Unmuted ${currentRecipient}`);
+            } else {
+                mutedUsers.push(currentRecipient);
+                console.log(`Muted ${currentRecipient}`);
+            }
+
+            // Update menu
+            updateChatSettingsMenu();
+
+            // Close settings menu
+            document.getElementById('chatSettingsMenu').classList.remove('show');
+        } else {
+            alert('Failed to update mute status');
+        }
+    } catch (error) {
+        console.error('Error toggling mute:', error);
+        alert('Error updating mute status');
+    }
+}
+
+async function toggleBlock() {
+    if (!currentRecipient) return;
+
+    const isBlocked = blockedUsers.includes(currentRecipient);
+
+    const action = isBlocked ? 'unblock' : 'block';
+    const confirmed = confirm(`Are you sure you want to ${action} ${currentRecipient}?`);
+    if (!confirmed) return;
+
+    try {
+        const endpoint = isBlocked ? '/api/user/unblock' : '/api/user/block';
+
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                blocker: currentUser,
+                blockee: currentRecipient
+            })
+        });
+
+        if (response.ok) {
+            if (isBlocked) {
+                blockedUsers = blockedUsers.filter(u => u !== currentRecipient);
+                console.log(`Unblocked ${currentRecipient}`);
+            } else {
+                blockedUsers.push(currentRecipient);
+                console.log(`Blocked ${currentRecipient}`);
+            }
+
+            // Update menu
+            updateChatSettingsMenu();
+
+            // Close settings menu and go back to user list
+            document.getElementById('chatSettingsMenu').classList.remove('show');
+            backToUserList();
+        } else {
+            alert('Failed to update block status');
+        }
+    } catch (error) {
+        console.error('Error toggling block:', error);
+        alert('Error updating block status');
+    }
+}
+
 // ==================== INITIALIZATION ====================
 document.addEventListener('DOMContentLoaded', () => {
     console.log('SecureChat E2EE Messenger Loaded');
@@ -872,6 +1058,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Back button
     document.getElementById('backBtn').addEventListener('click', backToUserList);
+
+    // Chat settings button
+    document.getElementById('chatSettingsBtn').addEventListener('click', toggleChatSettings);
+
+    // Chat settings menu items
+    document.getElementById('clearChatBtn').addEventListener('click', clearChat);
+    document.getElementById('muteBtn').addEventListener('click', toggleMute);
+    document.getElementById('blockBtn').addEventListener('click', toggleBlock);
 
     // Send button
     document.getElementById('sendBtn').addEventListener('click', sendMessage);
