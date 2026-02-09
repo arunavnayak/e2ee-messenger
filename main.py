@@ -356,19 +356,19 @@ async def mark_messages_read(from_username: str, to_username: str, db: Session =
 
 
 @app.post("/api/chat/clear")
-async def clear_chat(username: str, contact: str, db: Session = Depends(get_db)):
+async def clear_chat(req: ClearChatRequest, db: Session = Depends(get_db)):
     """Clear chat history between two users (removes pending messages)"""
 
     # Clear pending messages from contact to user
     db.query(PendingMessage).filter(
-        PendingMessage.from_username == contact,
-        PendingMessage.to_username == username
+        PendingMessage.from_username == req.contact,
+        PendingMessage.to_username == req.username
     ).delete()
 
     # Clear pending messages from user to contact
     db.query(PendingMessage).filter(
-        PendingMessage.from_username == username,
-        PendingMessage.to_username == contact
+        PendingMessage.from_username == req.username,
+        PendingMessage.to_username == req.contact
     ).delete()
 
     db.commit()
