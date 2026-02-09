@@ -9,7 +9,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depe
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
-from sqlalchemy import text
+from sqlalchemy import text, or_
 from sqlalchemy.orm import Session
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -182,6 +182,11 @@ class ClearChatRequest(BaseModel):
     contact: str
 
 
+class GetChatHistoryRequest(BaseModel):
+    username: str
+    contact: str
+
+
 # ==================== API ENDPOINTS ====================
 
 @app.post("/api/register")
@@ -244,7 +249,7 @@ async def login(req: LoginRequest, request: Request, db: Session = Depends(get_d
 
     vault = db.query(EncryptedVault).filter(EncryptedVault.username == req.username).first()
 
-    # Get pending messages with unread status
+    # Get all messages for this user (both read and unread)
     pending = db.query(PendingMessage).filter(
         PendingMessage.to_username == req.username
     ).all()
@@ -331,49 +336,94 @@ async def list_users(db: Session = Depends(get_db)):
     }
 
 
-@app.delete("/api/messages/clear/{username}")
-async def clear_messages(username: str, db: Session = Depends(get_db)):
-    """Clear pending messages after delivery"""
+@app.get("/api/chat/history/{username}/{contact}")
+async def get_chat_history(username: str, contact: str, db: Session = Depends(get_db)):
+    """Get complete chat history between two users (both sent and received messages)"""
 
-    db.query(PendingMessage).filter(PendingMessage.to_username == username).delete()
-    db.commit()
+    # Get ALL messages between these two users, ordered by timestamp
+    messages = db.query(PendingMessage).filter(
+        or_(
+            (PendingMessage.from_username == username) & (PendingMessage.to_username == contact),
+            (PendingMessage.from_username == contact) & (PendingMessage.to_username == username)
+        )
+    ).order_by(PendingMessage.timestamp).all()
 
-    return {"status": "success", "message": "Messages cleared"}
+    chat_history = [
+        {
+            "from": msg.from_username,
+            "to": msg.to_username,
+            "payload": msg.encrypted_payload,
+            "timestamp": msg.timestamp.isoformat(timespec="milliseconds") + "Z",
+            "read": msg.read,
+            # Indicate if this message was sent by the requesting user
+            "is_sent": msg.from_username == username
+        }
+        for msg in messages
+    ]
+
+    return {
+        "status": "success",
+        "messages": chat_history
+    }
+
+
+class MarkReadRequest(BaseModel):
+    from_username: str
+    to_username: str
 
 
 @app.post("/api/messages/mark-read")
-async def mark_messages_read(from_username: str, to_username: str, db: Session = Depends(get_db)):
+async def mark_messages_read(req: MarkReadRequest, db: Session = Depends(get_db)):
     """Mark messages from a specific user as read"""
 
     db.query(PendingMessage).filter(
-        PendingMessage.from_username == from_username,
-        PendingMessage.to_username == to_username
+        PendingMessage.from_username == req.from_username,
+        PendingMessage.to_username == req.to_username
     ).update({"read": True})
 
     db.commit()
 
     return {"status": "success", "message": "Messages marked as read"}
 
-
 @app.post("/api/chat/clear")
 async def clear_chat(req: ClearChatRequest, db: Session = Depends(get_db)):
-    """Clear chat history between two users (removes pending messages)"""
+    """Clear chat history between two users (removes all messages)"""
 
-    # Clear pending messages from contact to user
+    # Clear all messages between these two users
     db.query(PendingMessage).filter(
-        PendingMessage.from_username == req.contact,
-        PendingMessage.to_username == req.username
-    ).delete()
-
-    # Clear pending messages from user to contact
-    db.query(PendingMessage).filter(
-        PendingMessage.from_username == req.username,
-        PendingMessage.to_username == req.contact
-    ).delete()
+        ((PendingMessage.from_username == req.contact) & (PendingMessage.to_username == req.username)) |
+        ((PendingMessage.from_username == req.username) & (PendingMessage.to_username == req.contact))
+    ).delete(synchronize_session=False)
 
     db.commit()
 
     return {"status": "success", "message": "Chat cleared"}
+
+
+@app.post("/api/chat/history")
+async def get_chat_history(req: GetChatHistoryRequest, db: Session = Depends(get_db)):
+    """Get all chat messages between two users"""
+
+    # Get all messages between these two users
+    messages = db.query(PendingMessage).filter(
+        ((PendingMessage.from_username == req.contact) & (PendingMessage.to_username == req.username)) |
+        ((PendingMessage.from_username == req.username) & (PendingMessage.to_username == req.contact))
+    ).order_by(PendingMessage.timestamp.asc()).all()
+
+    return {
+        "status": "success",
+        "messages": [
+            {
+                "from": msg.from_username,
+                "to": msg.to_username,
+                "payload": msg.encrypted_payload,
+                "timestamp": msg.timestamp.isoformat(timespec="milliseconds") + "Z",
+                "read": msg.read,
+                "id": msg.id
+            }
+            for msg in messages
+        ]
+    }
 
 
 @app.post("/api/user/block")
@@ -544,6 +594,21 @@ async def websocket_endpoint(websocket: WebSocket, username: str):
                     })
                     continue
 
+                # ALWAYS save the message to database (for chat history)
+                try:
+                    message_record = PendingMessage(
+                        from_username=from_user,
+                        to_username=to_user,
+                        encrypted_payload=encrypted_payload,
+                        read=False  # Will be marked as read when recipient reads it
+                    )
+                    db.add(message_record)
+                    db.commit()
+                except Exception as e:
+                    print(f"Error saving message: {e}")
+                    db.rollback()
+
+                # Try to deliver in real-time
                 delivered = await manager.send_personal_message(
                     {
                         "type": "message",
@@ -555,35 +620,20 @@ async def websocket_endpoint(websocket: WebSocket, username: str):
                     to_user
                 )
 
-                if not delivered:
-                    try:
-                        pending_msg = PendingMessage(
-                            from_username=from_user,
-                            to_username=to_user,
-                            encrypted_payload=encrypted_payload,
-                            read=False
-                        )
-                        db.add(pending_msg)
-                        db.commit()
-
-                        await websocket.send_json({
-                            "type": "delivery_status",
-                            "status": "queued",
-                            "message": f"User {to_user} is offline. Message queued."
-                        })
-                    except Exception as e:
-                        print(f"Error saving pending message: {e}")
-                        db.rollback()
-                        await websocket.send_json({
-                            "type": "delivery_status",
-                            "status": "failed",
-                            "message": "Failed to queue message"
-                        })
-                else:
+                if delivered:
+                    # Message delivered in real-time
                     await websocket.send_json({
                         "type": "delivery_status",
                         "status": "delivered",
                         "message": f"Message delivered to {to_user}",
+                        "message_id": message_id
+                    })
+                else:
+                    # Message saved but user offline
+                    await websocket.send_json({
+                        "type": "delivery_status",
+                        "status": "queued",
+                        "message": f"User {to_user} is offline. Message queued.",
                         "message_id": message_id
                     })
 

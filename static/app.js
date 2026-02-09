@@ -474,6 +474,71 @@ async function openChat(username) {
     const messagesArea = document.getElementById('messagesArea');
     messagesArea.innerHTML = '';
 
+    // IMPORTANT: Clear pending messages for this user BEFORE fetching from server
+    // because the server will return ALL messages including these pending ones
+    delete pendingMessagesStore[username];
+
+    // Fetch complete chat history from server
+    try {
+        const response = await fetch(`/api/chat/history/${currentUser}/${username}`);
+        if (response.ok) {
+            const data = await response.json();
+
+            // Clear and rebuild chat history for this user
+            chatHistory[username] = [];
+
+            // Process all messages from server
+            for (const msg of data.messages) {
+                const serverTimestamp = new Date(msg.timestamp).getTime();
+                const payload = JSON.parse(msg.payload);
+
+                try {
+                    // Decrypt the message
+                    const senderPublicKey = msg.is_sent ?
+                        contacts.find(c => c.username === username)?.public_key :
+                        payload.sender_public_key;
+
+                    if (!senderPublicKey) {
+                        console.error('Cannot find sender public key');
+                        continue;
+                    }
+
+                    const decrypted = await CryptoManager.decryptMessage(
+                        payload.ciphertext,
+                        payload.nonce,
+                        senderPublicKey,
+                        userKeys.privateKey
+                    );
+
+                    // Add to chat history
+                    const messageType = msg.is_sent ? 'sent' : 'received';
+                    chatHistory[username].push({
+                        text: decrypted,
+                        type: messageType,
+                        timestamp: serverTimestamp,
+                        messageId: `server_${msg.timestamp}`,
+                        status: msg.is_sent ? 'delivered' : null
+                    });
+
+                } catch (error) {
+                    console.error('Error decrypting message:', error);
+                    // Add encrypted message as fallback
+                    const messageType = msg.is_sent ? 'sent' : 'received';
+                    chatHistory[username].push({
+                        text: '[Decryption failed]',
+                        type: messageType,
+                        timestamp: serverTimestamp,
+                        messageId: `server_${msg.timestamp}`,
+                        status: null
+                    });
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Error fetching chat history:', error);
+    }
+
+    // Now render all messages
     const history = chatHistory[username] || [];
     let lastDate = null;
 
@@ -492,13 +557,8 @@ async function openChat(username) {
         messagesArea.appendChild(messageEl);
     });
 
-    // Load pending messages
-    if (pendingMessagesStore[username]) {
-        for (const msg of pendingMessagesStore[username]) {
-            await processPendingMessage(msg);
-        }
-        delete pendingMessagesStore[username];
-    }
+    // NO LONGER PROCESSING pendingMessagesStore here!
+    // It's already included in the server response above
 
     // Scroll to bottom
     messagesArea.scrollTop = messagesArea.scrollHeight;
