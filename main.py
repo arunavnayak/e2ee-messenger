@@ -2,7 +2,7 @@ import hashlib
 import hmac
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from typing import Dict
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Request, status
@@ -258,7 +258,7 @@ async def login(req: LoginRequest, request: Request, db: Session = Depends(get_d
         {
             "from": msg.from_username,
             "payload": msg.encrypted_payload,
-            "timestamp": msg.timestamp.isoformat(timespec="milliseconds") + "Z",
+            "timestamp": msg.timestamp.isoformat(timespec="milliseconds"),
             "read": msg.read
         }
         for msg in pending
@@ -279,7 +279,7 @@ async def login(req: LoginRequest, request: Request, db: Session = Depends(get_d
     session = SessionToken(
         username=req.username,
         token_hash=token_hash,
-        expires_at=datetime.utcnow() + timedelta(hours=24)
+        expires_at=datetime.now(UTC) + timedelta(hours=24)
     )
     db.add(session)
 
@@ -353,7 +353,7 @@ async def get_chat_history(username: str, contact: str, db: Session = Depends(ge
             "from": msg.from_username,
             "to": msg.to_username,
             "payload": msg.encrypted_payload,
-            "timestamp": msg.timestamp.isoformat(timespec="milliseconds") + "Z",
+            "timestamp": msg.timestamp.isoformat(timespec="milliseconds"),
             "read": msg.read,
             # Indicate if this message was sent by the requesting user
             "is_sent": msg.from_username == username
@@ -417,7 +417,7 @@ async def get_chat_history(req: GetChatHistoryRequest, db: Session = Depends(get
                 "from": msg.from_username,
                 "to": msg.to_username,
                 "payload": msg.encrypted_payload,
-                "timestamp": msg.timestamp.isoformat(timespec="milliseconds") + "Z",
+                "timestamp": msg.timestamp.isoformat(timespec="milliseconds"),
                 "read": msg.read,
                 "id": msg.id
             }
@@ -614,7 +614,7 @@ async def websocket_endpoint(websocket: WebSocket, username: str):
                         "type": "message",
                         "from": from_user,
                         "payload": encrypted_payload,
-                        "timestamp": datetime.utcnow().isoformat(timespec="milliseconds") + "Z",
+                        "timestamp": datetime.now(UTC).isoformat(timespec="milliseconds"),
                         "message_id": message_id
                     },
                     to_user
@@ -723,7 +723,7 @@ async def health_check(db: Session = Depends(get_db)):
     return {
         "status": "healthy",
         "database": db_status,
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": datetime.now(UTC).isoformat()
     }
 
 
