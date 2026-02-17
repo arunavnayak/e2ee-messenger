@@ -11,10 +11,10 @@ class User(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String(32), unique=True, index=True, nullable=False)
-    email = Column(String(128), unique=True, index=True, nullable=False)  # ✅ NEW
+    email = Column(String(128), unique=True, index=True, nullable=False)
     auth_hash = Column(String(128), nullable=False)  # PBKDF2 hash for authentication
     public_key = Column(Text, nullable=False)  # X25519 public key (base64)
-    is_verified = Column(Boolean, default=False)  # ✅ NEW
+    is_verified = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
