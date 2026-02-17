@@ -46,3 +46,54 @@ DO $$
 BEGIN
     RAISE NOTICE '✅ Migration completed successfully!';
 END $$;
+
+
+-- ===================== ALTER TABLE: users =====================
+-- Add email column (nullable for existing users)
+ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS email VARCHAR(128);
+
+-- Ensure all existing rows have unique dummy emails (for SQLite fallback)
+-- NOTE: You can later update these manually if needed.
+UPDATE users
+SET email = username || '@placeholder.local'
+WHERE email IS NULL;
+
+-- Add a unique constraint (Postgres-safe)
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'uq_users_email'
+    ) THEN
+ALTER TABLE users ADD CONSTRAINT uq_users_email UNIQUE (email);
+END IF;
+EXCEPTION WHEN others THEN
+    -- Ignore if running under SQLite (no pg_constraint table)
+    RAISE NOTICE 'Skipping UNIQUE constraint creation (likely SQLite)';
+END;
+$$;
+
+-- Add is_verified column (default false)
+ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT FALSE;
+
+-- ===============================================================
+
+-- ===================== CREATE TABLE: user_verifications =====================
+CREATE TABLE IF NOT EXISTS user_verifications (
+                                                  id SERIAL PRIMARY KEY,
+                                                  username VARCHAR(32) UNIQUE NOT NULL,
+    email VARCHAR(128) NOT NULL,
+    otp_code VARCHAR(6) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL
+                             );
+
+-- Add indexes for lookup performance
+CREATE INDEX IF NOT EXISTS idx_verifications_username
+    ON user_verifications (username);
+
+CREATE INDEX IF NOT EXISTS idx_verifications_email
+    ON user_verifications (email);
+
+-- ===============================================================

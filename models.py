@@ -1,6 +1,9 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, Index
+from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, Index, ForeignKey
 from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
 from database import Base
+
+
 
 class User(Base):
     """User account with public key and auth hash"""
@@ -8,9 +11,12 @@ class User(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String(32), unique=True, index=True, nullable=False)
+    email = Column(String(128), unique=True, index=True, nullable=False)  # ✅ NEW
     auth_hash = Column(String(128), nullable=False)  # PBKDF2 hash for authentication
     public_key = Column(Text, nullable=False)  # X25519 public key (base64)
+    is_verified = Column(Boolean, default=False)  # ✅ NEW
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
 
 class EncryptedVault(Base):
     """Zero-knowledge encrypted vault storing user's private key"""
@@ -65,3 +71,14 @@ class UserPreferences(Base):
     __table_args__ = (
         Index('idx_user_preferences_username', 'username'),
     )
+
+class UserVerification(Base):
+    """Temporary storage for unverified users"""
+    __tablename__ = "user_verifications"
+
+    id = Column(Integer, primary_key=True)
+    username = Column(String(32), unique=True, nullable=False)
+    email = Column(String(128), nullable=False)
+    otp_code = Column(String(6), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    expires_at = Column(DateTime(timezone=True), nullable=False)

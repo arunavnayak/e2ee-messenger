@@ -703,6 +703,57 @@
             background: rgba(0,0,0,0.2);
             border-radius: 3px;
         }
+
+        /* ===== OTP Verification Page Styling ===== */
+        .otp-page {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            min-height: 100vh;
+            background-color: #f8fafc; /* gray-100 */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 50;
+        }
+
+        .otp-container {
+            animation: fadeIn 0.25s ease-out;
+        }
+
+        .otp-input {
+            font-family: 'Courier New', monospace;
+            letter-spacing: 6px;
+            text-transform: uppercase;
+        }
+
+        /* Subtle fade animation */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Status message styling */
+        #resendOtpBtn[disabled] {
+            pointer-events: none;
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .status-message {
+            transition: color 0.2s ease, opacity 0.2s ease;
+        }
+
+        .status-message.error {
+            color: #dc2626; /* red‑600 */
+        }
+
+        .status-message.success {
+            color: #16a34a; /* green‑600 */
+        }
+
     </style>
 </head>
 <body>
@@ -745,6 +796,10 @@
             <div class="input-group">
                 <label>Confirm Password</label>
                 <input type="password" id="registerConfirm" placeholder="Confirm your password" autocomplete="new-password">
+            </div>
+            <div class="input-group">
+                <label>Email</label>
+                <input id="registerEmail" type="email" placeholder="Email address" required />
             </div>
             <button class="submit-btn" id="registerBtn">
                 Create Account
@@ -849,6 +904,31 @@
         </div>
     </div>
 </div>
+
+<!-- ==================== OTP VERIFICATION PAGE ==================== -->
+<div id="otpPage" class="modal-overlay">
+    <div class="modal-content">
+        <h2>Verify Your Email</h2>
+        <p>
+            We’ve sent a 6‑digit verification code to your email. Please enter it below to complete registration.
+        </p>
+        <div class="input-group">
+            <label>OTP</label>
+            <input id="otpInput" class="input-group" maxlength="6" placeholder="Enter OTP" />
+        </div>
+        <div class="modal-buttons">
+            <button id="verifyOtpBtn" class="btn-primary">Verify</button>
+        </div>
+
+        <div id="otpStatus" class="status-message"></div>
+
+        <div class="modal-buttons">
+            <button id="resendOtpBtn" class="btn-secondary">Resend Code</button>
+        </div>
+        <p class="subtitle">Didn’t get the code? Check your spam folder.</p>
+    </div>
+</div>
+
 
 <script src="/static/crypto.js"></script>
 <script src="/static/app.js"></script>

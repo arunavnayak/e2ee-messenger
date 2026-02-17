@@ -15,9 +15,12 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 # Local Imports
 from database import engine, get_db, Base, SessionLocal
-from models import User, EncryptedVault, PendingMessage, SessionToken, UserPreferences
+from models import User, EncryptedVault, PendingMessage, SessionToken, UserPreferences, UserVerification
 from rate_limiter import RateLimitMiddleware, login_rate_limiter, ws_rate_limiter
 from status import router as status_router
+
+from email_utils import send_otp_email
+import random
 
 # Initialize Database
 Base.metadata.create_all(bind=engine)
@@ -43,7 +46,7 @@ def hash_token(token: str) -> str:
 def cleanup_expired_tokens(db: Session):
     """Remove expired session tokens from database"""
     db.query(SessionToken).filter(
-        SessionToken.expires_at < datetime.utcnow()
+        SessionToken.expires_at < datetime.now(UTC)
     ).delete()
     db.commit()
 
@@ -135,6 +138,7 @@ app.add_middleware(RateLimitMiddleware)
 
 class RegisterRequest(BaseModel):
     username: str
+    email: str  # ✅ new field
     auth_hash: str
     public_key: str
     encrypted_vault: str
@@ -146,12 +150,21 @@ class RegisterRequest(BaseModel):
             raise ValueError('Username must be 3-32 characters')
         if not v.isalnum():
             raise ValueError('Username must be alphanumeric')
+        return v
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v):
+        if "@" not in v:
+            raise ValueError("Invalid email format")
         return v.lower()
 
 
 class LoginRequest(BaseModel):
     username: str
     auth_hash: str
+
+class OTPRequest(BaseModel):
+    username: str
 
 
 class UpdateVaultRequest(BaseModel):
@@ -191,33 +204,63 @@ class GetChatHistoryRequest(BaseModel):
 
 @app.post("/api/register")
 async def register(req: RegisterRequest, db: Session = Depends(get_db)):
-    """Register new user with zero-knowledge vault"""
+    """
+    Step 1: Register user and send OTP to email using Brevo (no‑reply)
+    """
 
-    existing_user = db.query(User).filter(User.username == req.username).first()
-    if existing_user:
+    if db.query(User).filter(User.username == req.username).first():
         raise HTTPException(status_code=400, detail="Username already exists")
 
+    if db.query(User).filter(User.email == req.email).first():
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    # Create user (unverified)
     user = User(
         username=req.username,
+        email=req.email,
         auth_hash=req.auth_hash,
-        public_key=req.public_key
+        public_key=req.public_key,
+        is_verified=False,
     )
     db.add(user)
 
     vault = EncryptedVault(
-        username=req.username,
-        encrypted_vault_blob=req.encrypted_vault
+        username=req.username, encrypted_vault_blob=req.encrypted_vault
     )
     db.add(vault)
-
-    # Create default preferences
-    prefs = UserPreferences(username=req.username, blocked_users='[]', muted_users='[]')
-    db.add(prefs)
-
     db.commit()
 
-    return {"status": "success", "message": "User registered successfully"}
+    # Generate OTP and send
+    otp = "".join(random.choices("0123456789", k=6))
+    exp_time = datetime.now(UTC) + timedelta(minutes=10)
 
+    # If previous verification exists, delete it
+    old = (
+        db.query(UserVerification)
+        .filter(UserVerification.username == req.username)
+        .first()
+    )
+    if old:
+        db.delete(old)
+        db.commit()
+
+    verification = UserVerification(
+        username=req.username, email=req.email, otp_code=otp, expires_at=exp_time
+    )
+    db.add(verification)
+    db.commit()
+
+    try:
+        send_otp_email(req.email, req.username, otp)
+    except Exception as e:
+        print("Brevo email failure:", e)
+        raise HTTPException(status_code=500, detail="Could not send verification email")
+
+    return {
+        "status": "pending_verification",
+        "username": req.username,
+        "message": f"OTP sent to {req.email}",
+    }
 
 @app.post("/api/login")
 async def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
@@ -237,6 +280,13 @@ async def login(req: LoginRequest, request: Request, db: Session = Depends(get_d
         )
 
     user = db.query(User).filter(User.username == req.username).first()
+    if not user.is_verified:
+        return {
+            "status": "pending_verification",
+            "username": req.username,
+            "message": "Account email not verified. Please verify via OTP.",
+        }
+        # raise HTTPException(status_code=403, detail="Account email not verified. Please verify via OTP.")
 
     # Use constant-time comparison to prevent timing attacks
     if not user or not constant_time_compare(user.auth_hash, req.auth_hash):
@@ -258,7 +308,7 @@ async def login(req: LoginRequest, request: Request, db: Session = Depends(get_d
         {
             "from": msg.from_username,
             "payload": msg.encrypted_payload,
-            "timestamp": msg.timestamp.isoformat(timespec="milliseconds"),
+            "timestamp": msg.timestamp.isoformat(timespec="milliseconds") + "Z",
             "read": msg.read
         }
         for msg in pending
@@ -353,7 +403,7 @@ async def get_chat_history(username: str, contact: str, db: Session = Depends(ge
             "from": msg.from_username,
             "to": msg.to_username,
             "payload": msg.encrypted_payload,
-            "timestamp": msg.timestamp.isoformat(timespec="milliseconds"),
+            "timestamp": msg.timestamp.isoformat(timespec="milliseconds") + "Z",
             "read": msg.read,
             # Indicate if this message was sent by the requesting user
             "is_sent": msg.from_username == username
@@ -417,7 +467,7 @@ async def get_chat_history(req: GetChatHistoryRequest, db: Session = Depends(get
                 "from": msg.from_username,
                 "to": msg.to_username,
                 "payload": msg.encrypted_payload,
-                "timestamp": msg.timestamp.isoformat(timespec="milliseconds"),
+                "timestamp": msg.timestamp.isoformat(timespec="milliseconds") + "Z",
                 "read": msg.read,
                 "id": msg.id
             }
@@ -497,6 +547,92 @@ async def get_preferences(username: str, db: Session = Depends(get_db)):
         "muted_users": json.loads(prefs.muted_users)
     }
 
+#Verify OTP
+class VerifyOTPRequest(BaseModel):
+    username: str
+    otp_code: str
+
+@app.post("/api/verify-otp")
+async def verify_otp(req: VerifyOTPRequest, db: Session = Depends(get_db)):
+    """
+    Step 2: Verify OTP and mark user as verified
+    """
+    record = (
+        db.query(UserVerification)
+        .filter(UserVerification.username == req.username)
+        .first()
+    )
+    if not record:
+        raise HTTPException(status_code=404, detail="No verification record found")
+
+    if record.otp_code != req.otp_code:
+        raise HTTPException(status_code=400, detail="Invalid OTP")
+
+    # If record.expires_at is naive, tell Python it's actually UTC
+    if record.expires_at.replace(tzinfo=UTC) < datetime.now(UTC):
+        raise HTTPException(status_code=400, detail="OTP expired")
+
+    user = db.query(User).filter(User.username == req.username).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user.is_verified = True
+    db.delete(record)
+    db.commit()
+
+    return {"status": "success", "message": "Email verified successfully"}
+
+
+
+@app.post("/api/resend-otp")
+async def resend_otp(req: OTPRequest, db: Session = Depends(get_db)):
+    """
+    Generate and send a new OTP via Brevo
+    (Only allowed if user exists but is not yet verified)
+    """
+    user = db.query(User).filter(User.username == req.username).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if user.is_verified:
+        raise HTTPException(status_code=400, detail="User already verified")
+
+    # Before generating OTP:
+    if not ws_rate_limiter.check_message(req.username):
+        raise HTTPException(status_code=429, detail="Please wait before requesting another OTP")
+
+    # Delete any previous pending OTP records
+    existing = (
+        db.query(UserVerification)
+        .filter(UserVerification.username == req.username)
+        .first()
+    )
+    if existing:
+        db.delete(existing)
+        db.commit()
+
+    # Generate new OTP
+    import random
+    otp = "".join(random.choices("0123456789", k=6))
+    expires_at = datetime.now(UTC) + timedelta(minutes=10)
+
+    record = UserVerification(
+        username=user.username, email=user.email, otp_code=otp, expires_at=expires_at
+    )
+    db.add(record)
+    db.commit()
+
+    try:
+        send_otp_email(user.email, user.username, otp)
+    except Exception as e:
+        print("Brevo send error:", e)
+        raise HTTPException(status_code=500, detail="Failed to send OTP email")
+
+    return {
+        "status": "success",
+        "message": f"New OTP sent to {user.email}. It will expire in 10 minutes.",
+    }
+
 
 # ==================== WEBSOCKET ENDPOINT ====================
 
@@ -507,7 +643,7 @@ async def verify_websocket_token(username: str, token: str, db: Session) -> bool
     session = db.query(SessionToken).filter(
         SessionToken.username == username,
         SessionToken.token_hash == token_hash,
-        SessionToken.expires_at > datetime.utcnow()
+        SessionToken.expires_at > datetime.now(UTC)
     ).first()
 
     return session is not None

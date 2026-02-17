@@ -8,7 +8,7 @@ let userKeys = {
     privateKey: null
 };
 let contacts = [];
-let chatHistory = {}; // { username: [ {text, type, timestamp, messageId, status, date} ] }
+let chatHistory = {};
 let pendingMessagesStore = {};
 let unreadCounts = {};
 let blockedUsers = [];
@@ -40,7 +40,7 @@ function formatDate(timestamp) {
     } else if (date.toDateString() === yesterday.toDateString()) {
         return 'Yesterday';
     } else {
-        return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        return date.toLocaleDateString('en-US', {month: 'short', day: 'numeric', year: 'numeric'});
     }
 }
 
@@ -82,6 +82,12 @@ async function handleRegister() {
     const username = document.getElementById('registerUsername').value.trim();
     const password = document.getElementById('registerPassword').value;
     const confirm = document.getElementById('registerConfirm').value;
+    const email = document.getElementById('registerEmail').value.trim();
+
+    if (!email || !email.includes('@')) {
+        showStatus('authStatus', 'Please provide a valid email address', true);
+        return;
+    }
 
     if (!username || !password || !confirm) {
         showStatus('authStatus', 'Please fill all fields', true);
@@ -108,9 +114,10 @@ async function handleRegister() {
 
         const response = await fetch('/api/register', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
-                username: username.toLowerCase(),
+                username: username,
+                email: email,
                 auth_hash: authHash,
                 public_key: keyPair.publicKey,
                 encrypted_vault: encryptedVault
@@ -120,13 +127,19 @@ async function handleRegister() {
         const data = await response.json();
 
         if (response.ok) {
-            showStatus('authStatus', 'Registration successful! Logging in...', false);
-            setTimeout(() => {
-                document.getElementById('loginUsername').value = username;
-                document.getElementById('loginPassword').value = password;
-                switchTab('login');
-                handleLogin();
-            }, 1000);
+            if (data.status === 'pending_verification') {
+                showStatus('authStatus', 'Check your email for OTP verification', false);
+                // Redirect to verification page or modal
+                openOTPVerification(username);
+            } else {
+                showStatus('authStatus', 'Registration successful! Logging in...', false);
+                setTimeout(() => {
+                    document.getElementById('loginUsername').value = username;
+                    document.getElementById('loginPassword').value = password;
+                    switchTab('login');
+                    handleLogin();
+                }, 1000);
+            }
         } else {
             showStatus('authStatus', data.detail || 'Registration failed', true);
         }
@@ -134,6 +147,102 @@ async function handleRegister() {
         showStatus('authStatus', 'Error: ' + error.message, true);
     }
 }
+
+function disableResendButton(seconds) {
+    const btn = document.getElementById('resendOtpBtn');
+    btn.disabled = true;
+    btn.classList.add('opacity-50', 'cursor-not-allowed');
+    let remaining = seconds;
+    btn.textContent = `Resend Code (${remaining}s)`;
+    const timer = setInterval(() => {
+        remaining -= 1;
+        if (remaining <= 0) {
+            clearInterval(timer);
+            btn.disabled = false;
+            btn.classList.remove('opacity-50', 'cursor-not-allowed');
+            btn.textContent = 'Resend Code';
+        } else {
+            btn.textContent = `Resend Code (${remaining}s)`;
+        }
+    }, 1000);
+}
+
+function openOTPVerification(username) {
+    document.getElementById('authScreen').style.display = 'none';
+    const otpPage = document.getElementById('otpPage');
+    otpPage.style.display = 'flex';
+
+    let otpExpireTimer = null;
+
+    // --- start timer (10 minutes) ---
+    startOtpExpirationTimer();
+
+    document.getElementById('verifyOtpBtn').onclick = async () => {
+        const otp = document.getElementById('otpInput').value.trim();
+        const res = await fetch('/api/verify-otp', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({username, otp_code: otp})
+        });
+        const data = await res.json();
+
+        if (res.ok) {
+            showStatus('otpStatus', '✅ Email Verified! You can now log in.', false);
+            clearTimeout(otpExpireTimer);
+            setTimeout(() => {
+                otpPage.style.display = 'none';
+                document.getElementById('authScreen').style.display = 'flex';
+                switchTab('login');
+            }, 1200);
+        } else {
+            showStatus('otpStatus', data.detail || 'Invalid or expired OTP', true);
+        }
+    };
+
+    // ------------------ resend OTP logic ------------------
+    document.getElementById('resendOtpBtn').onclick = async () => {
+        showStatus('otpStatus', 'Sending new OTP...', false);
+        disableResendButton(60);
+        try {
+            const res = await fetch('/api/resend-otp', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({username: username})
+            });
+            const data = await res.json();
+            if (res.ok) {
+                showStatus('otpStatus', 'New OTP sent! Please check your email.', false);
+                clearTimeout(otpExpireTimer);
+                startOtpExpirationTimer(); // restart 10‑min window
+            } else {
+                showStatus('otpStatus', data.detail || 'Could not resend OTP', true);
+            }
+        } catch (err) {
+            showStatus('otpStatus', 'Error contacting server', true);
+        }
+    };
+
+    // ------------------ expiration handler ------------------
+    function startOtpExpirationTimer() {
+        const expiryMinutes = 10;
+        let remaining = expiryMinutes * 60; // seconds
+
+        otpExpireTimer = setInterval(() => {
+            remaining--;
+            // optional live countdown
+            // console.log('OTP expires in', remaining, 'seconds');
+            if (remaining <= 0) {
+                clearInterval(otpExpireTimer);
+                showStatus(
+                    'otpStatus',
+                    '⚠️ Your code has expired. Please click "Resend Code" to get a new one.',
+                    true
+                );
+            }
+        }, 1000);
+    }
+}
+
 
 async function handleLogin() {
     const username = document.getElementById('loginUsername').value.trim();
@@ -151,9 +260,9 @@ async function handleLogin() {
 
         const response = await fetch('/api/login', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
-                username: username.toLowerCase(),
+                username: username,
                 auth_hash: authHash
             })
         });
@@ -161,45 +270,53 @@ async function handleLogin() {
         const data = await response.json();
 
         if (response.ok) {
-            showStatus('authStatus', 'Decrypting vault...', false);
+            if(data.status === 'pending_verification'){
+                showStatus('authStatus', data.message , false);
+                // Redirect to verification page or modal
+                openOTPVerification(username);
+            }else{
+                showStatus('authStatus', 'Decrypting vault...', false);
 
-            const storageKey = await CryptoManager.deriveStorageKey(username, password);
-            const privateKey = await CryptoManager.decryptVault(data.encrypted_vault, storageKey);
+                const storageKey = await CryptoManager.deriveStorageKey(username, password);
+                const privateKey = await CryptoManager.decryptVault(data.encrypted_vault, storageKey);
 
-            currentUser = username.toLowerCase();
-            userKeys.publicKey = data.public_key;
-            userKeys.privateKey = privateKey;
-            sessionToken = data.session_token;
+                currentUser = username;
+                userKeys.publicKey = data.public_key;
+                userKeys.privateKey = privateKey;
+                sessionToken = data.session_token;
 
-            sessionStorage.setItem('encryptedVault', data.encrypted_vault);
+                sessionStorage.setItem('encryptedVault', data.encrypted_vault);
 
-            // Store unread counts from server
-            unreadCounts = data.unread_counts || {};
+                // Store unread counts from server
+                unreadCounts = data.unread_counts || {};
 
-            // Store blocked and muted users
-            blockedUsers = data.blocked_users || [];
-            mutedUsers = data.muted_users || [];
+                // Store blocked and muted users
+                blockedUsers = data.blocked_users || [];
+                mutedUsers = data.muted_users || [];
 
-            // Store pending messages
-            if (data.pending_messages && data.pending_messages.length > 0) {
-                for (const msg of data.pending_messages) {
-                    if (!pendingMessagesStore[msg.from]) {
-                        pendingMessagesStore[msg.from] = [];
+                // Store pending messages
+                if (data.pending_messages && data.pending_messages.length > 0) {
+                    for (const msg of data.pending_messages) {
+                        if (!pendingMessagesStore[msg.from]) {
+                            pendingMessagesStore[msg.from] = [];
+                        }
+                        pendingMessagesStore[msg.from].push(msg);
                     }
-                    pendingMessagesStore[msg.from].push(msg);
                 }
+
+                // Switch to chat interface
+                document.getElementById('authScreen').style.display = 'none';
+                document.getElementById('chatContainer').style.display = 'block';
+                document.getElementById('userListPage').style.display = 'flex';
+
+                connectWebSocket();
+                await loadContacts();
+
+                // Clear password
+                document.getElementById('loginPassword').value = '';
+
+                clearStatus('authStatus');
             }
-
-            // Switch to chat interface
-            document.getElementById('authScreen').style.display = 'none';
-            document.getElementById('chatContainer').style.display = 'block';
-            document.getElementById('userListPage').style.display = 'flex';
-
-            connectWebSocket();
-            await loadContacts();
-
-            // Clear password
-            document.getElementById('loginPassword').value = '';
         } else {
             showStatus('authStatus', data.detail || 'Login failed', true);
         }
@@ -216,7 +333,7 @@ function handleLogout() {
     currentUser = null;
     currentRecipient = null;
     sessionToken = null;
-    userKeys = { publicKey: null, privateKey: null };
+    userKeys = {publicKey: null, privateKey: null};
     contacts = [];
     chatHistory = {};
     pendingMessagesStore = {};
@@ -298,7 +415,7 @@ async function handlePasswordChange() {
 
         const response = await fetch('/api/update-vault', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
                 username: currentUser,
                 old_auth_hash: result.oldAuthHash,
@@ -444,11 +561,11 @@ function renderUsersList() {
 }
 
 function filterUsers() {
-    const search = document.getElementById('userSearch').value.toLowerCase();
+    const search = document.getElementById('userSearch').value;
     const userItems = document.querySelectorAll('.user-item');
 
     userItems.forEach(item => {
-        const name = item.querySelector('.user-name').textContent.toLowerCase();
+        const name = item.querySelector('.user-name').textContent;
         item.style.display = name.includes(search) ? 'flex' : 'none';
     });
 }
@@ -601,12 +718,17 @@ function createMessageElement(msg) {
 }
 
 function getStatusIcon(status) {
-    switch(status) {
-        case 'sent': return '<span class="status-sent">✓</span>';
-        case 'delivered': return '<span class="status-delivered">✓✓</span>';
-        case 'read': return '<span class="status-read">✓✓</span>';
-        case 'failed': return '<span class="status-failed">❌</span>';
-        default: return '';
+    switch (status) {
+        case 'sent':
+            return '<span class="status-sent">✓</span>';
+        case 'delivered':
+            return '<span class="status-delivered">✓✓</span>';
+        case 'read':
+            return '<span class="status-read">✓✓</span>';
+        case 'failed':
+            return '<span class="status-failed">❌</span>';
+        default:
+            return '';
     }
 }
 
@@ -683,7 +805,7 @@ function addMessageToUI(text, type, timestamp, messageId, status) {
         messagesArea.appendChild(dateDivider);
     }
 
-    const msgEl = createMessageElement({ text, type, timestamp, messageId, status });
+    const msgEl = createMessageElement({text, type, timestamp, messageId, status});
     messagesArea.appendChild(msgEl);
     messagesArea.scrollTop = messagesArea.scrollHeight;
 }
@@ -693,7 +815,7 @@ function saveToHistory(username, text, type, timestamp, messageId, status) {
         chatHistory[username] = [];
     }
 
-    chatHistory[username].push({ text, type, timestamp, messageId, status });
+    chatHistory[username].push({text, type, timestamp, messageId, status});
 
     // Update user list if not in chat with this user
     if (currentRecipient !== username) {
@@ -963,7 +1085,7 @@ async function clearChat() {
         // Clear from server
         const response = await fetch('/api/chat/clear', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
                 username: currentUser,
                 contact: currentRecipient
@@ -1001,7 +1123,7 @@ async function toggleMute() {
 
         const response = await fetch(endpoint, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
                 muter: currentUser,
                 mutee: currentRecipient
@@ -1045,7 +1167,7 @@ async function toggleBlock() {
 
         const response = await fetch(endpoint, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
                 blocker: currentUser,
                 blockee: currentRecipient
