@@ -311,7 +311,7 @@ async def login(req: LoginRequest, request: Request, db: Session = Depends(get_d
         {
             "from": msg.from_username,
             "payload": msg.encrypted_payload,
-            "timestamp": msg.timestamp.isoformat(timespec="milliseconds") + "Z",
+            "timestamp": msg.timestamp.isoformat(timespec="milliseconds"),
             "read": msg.read
         }
         for msg in pending
@@ -406,7 +406,7 @@ async def get_chat_history(username: str, contact: str, db: Session = Depends(ge
             "from": msg.from_username,
             "to": msg.to_username,
             "payload": msg.encrypted_payload,
-            "timestamp": msg.timestamp.isoformat(timespec="milliseconds") + "Z",
+            "timestamp": msg.timestamp.isoformat(timespec="milliseconds"),
             "read": msg.read,
             # Indicate if this message was sent by the requesting user
             "is_sent": msg.from_username == username
@@ -470,7 +470,7 @@ async def get_chat_history(req: GetChatHistoryRequest, db: Session = Depends(get
                 "from": msg.from_username,
                 "to": msg.to_username,
                 "payload": msg.encrypted_payload,
-                "timestamp": msg.timestamp.isoformat(timespec="milliseconds") + "Z",
+                "timestamp": msg.timestamp.isoformat(timespec="milliseconds"),
                 "read": msg.read,
                 "id": msg.id
             }
