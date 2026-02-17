@@ -280,6 +280,9 @@ async def login(req: LoginRequest, request: Request, db: Session = Depends(get_d
         )
 
     user = db.query(User).filter(User.username == req.username).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
     if not user.is_verified:
         return {
             "status": "pending_verification",
