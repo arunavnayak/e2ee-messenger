@@ -81,8 +81,8 @@ ALTER TABLE users
 
 -- ===================== CREATE TABLE: user_verifications =====================
 CREATE TABLE IF NOT EXISTS user_verifications (
-                                                  id SERIAL PRIMARY KEY,
-                                                  username VARCHAR(32) UNIQUE NOT NULL,
+    id SERIAL PRIMARY KEY,
+    username VARCHAR(32) UNIQUE NOT NULL,
     email VARCHAR(128) NOT NULL,
     otp_code VARCHAR(6) NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
