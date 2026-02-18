@@ -45,7 +45,7 @@
             background: white;
             padding: 40px 30px;
             border-radius: 20px;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
             width: 100%;
             max-width: 400px;
         }
@@ -363,7 +363,7 @@
             width: 40px;
             height: 40px;
             border-radius: 50%;
-            background: rgba(255,255,255,0.3);
+            background: rgba(255, 255, 255, 0.3);
             display: flex;
             align-items: center;
             justify-content: center;
@@ -407,12 +407,12 @@
         }
 
         .date-divider span {
-            background: rgba(255,255,255,0.9);
+            background: rgba(255, 255, 255, 0.9);
             padding: 5px 12px;
             border-radius: 7px;
             font-size: 12px;
             color: #667;
-            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
         }
 
         .message {
@@ -458,7 +458,7 @@
             background: white;
             color: var(--text-dark);
             border-radius: 8px 8px 8px 0;
-            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
         }
 
         .message-text {
@@ -482,7 +482,7 @@
         }
 
         .message.sent .message-footer {
-            color: rgba(255,255,255,0.8);
+            color: rgba(255, 255, 255, 0.8);
         }
 
         .message.received .message-footer {
@@ -493,15 +493,26 @@
             font-size: 14px;
         }
 
-        .status-sent { color: rgba(255,255,255,0.6); }
-        .status-delivered { color: rgba(255,255,255,0.8); }
-        .status-read { color: #4fc3f7; }
-        .status-failed { color: #f44336; }
+        .status-sent {
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        .status-delivered {
+            color: rgba(255, 255, 255, 0.8);
+        }
+
+        .status-read {
+            color: #4fc3f7;
+        }
+
+        .status-failed {
+            color: #f44336;
+        }
 
         .typing-indicator {
             display: none;
             padding: 12px 15px;
-            background: rgba(255,255,255,0.9);
+            background: rgba(255, 255, 255, 0.9);
             font-size: 14px;
             color: #667;
             font-style: italic;
@@ -568,7 +579,7 @@
 
         /* ===== SETTINGS MENU ===== */
         .settings-menu {
-            position: absolute;
+            /*position: absolute;
             top: 60px;
             right: 15px;
             background: white;
@@ -579,16 +590,40 @@
             visibility: hidden;
             transform: translateY(-10px);
             transition: all 0.2s;
-            z-index: 1000;
+            z-index: 1000;*/
+            display: none;
+            position: absolute;
+            top: 55px;
+            right: 15px;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            padding: 5px 0;
+            z-index: 100;
+            min-width: 180px;
         }
 
         .settings-menu.show {
-            opacity: 1;
+            /*opacity: 1;
             visibility: visible;
-            transform: translateY(0);
+            transform: translateY(0);*/
+            display: block;
+            animation: fadeIn 0.2s;
         }
 
-        .settings-menu button {
+        .settings-item {
+            padding: 12px 20px;
+            cursor: pointer;
+            font-size: 14px;
+            color: #333;
+            transition: background 0.2s;
+        }
+
+        .settings-item:hover {
+            background: #f0f2f5;
+        }
+
+        /*.settings-menu button {
             display: block;
             width: 100%;
             padding: 12px 20px;
@@ -602,7 +637,82 @@
 
         .settings-menu button:hover {
             background: #f5f6f7;
+        }*/
+
+        /* Attachment Menu */
+        .attachment-menu {
+            display: none;
+            position: absolute;
+            bottom: 65px;
+            left: 15px;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            padding: 10px;
+            z-index: 100;
         }
+
+        .attachment-menu.show {
+            display: block;
+            animation: slideUp 0.3s;
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .attachment-item {
+            display: flex;
+            align-items: center;
+            padding: 12px 15px;
+            cursor: pointer;
+            border-radius: 10px;
+            transition: background 0.2s;
+        }
+
+        .attachment-item:hover {
+            background: #f0f2f5;
+        }
+
+        .attachment-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            margin-right: 12px;
+        }
+
+        .attachment-icon.document {
+            background: #5f6caf;
+        }
+
+        .attachment-icon.camera {
+            background: #d3396d;
+        }
+
+        .attachment-icon.gallery {
+            background: #ac44cf;
+        }
+
+        .attachment-icon.location {
+            background: #04a784;
+        }
+
+        .attachment-label {
+            font-size: 14px;
+            color: #333;
+        }
+
 
         /* ===== PASSWORD CHANGE MODAL ===== */
         .modal-overlay {
@@ -612,7 +722,7 @@
             left: 0;
             right: 0;
             bottom: 0;
-            background: rgba(0,0,0,0.5);
+            background: rgba(0, 0, 0, 0.5);
             z-index: 2000;
             align-items: center;
             justify-content: center;
@@ -629,7 +739,7 @@
             border-radius: 20px;
             width: 100%;
             max-width: 400px;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
         }
 
         .modal-content h2 {
@@ -680,14 +790,16 @@
             display: inline-block;
             width: 16px;
             height: 16px;
-            border: 2px solid rgba(255,255,255,0.3);
+            border: 2px solid rgba(255, 255, 255, 0.3);
             border-radius: 50%;
             border-top-color: white;
             animation: spin 0.8s linear infinite;
         }
 
         @keyframes spin {
-            to { transform: rotate(360deg); }
+            to {
+                transform: rotate(360deg);
+            }
         }
 
         /* Hide scrollbar for chat messages */
@@ -700,7 +812,7 @@
         }
 
         .messages-area::-webkit-scrollbar-thumb {
-            background: rgba(0,0,0,0.2);
+            background: rgba(0, 0, 0, 0.2);
             border-radius: 3px;
         }
 
@@ -731,8 +843,14 @@
 
         /* Subtle fade animation */
         @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
 
         /* Status message styling */
@@ -776,7 +894,8 @@
             </div>
             <div class="input-group">
                 <label>Password</label>
-                <input type="password" id="loginPassword" placeholder="Enter your password" autocomplete="current-password">
+                <input type="password" id="loginPassword" placeholder="Enter your password"
+                       autocomplete="current-password">
             </div>
             <button class="submit-btn" id="loginBtn">
                 Login
@@ -791,15 +910,17 @@
             </div>
             <div class="input-group">
                 <label>Password</label>
-                <input type="password" id="registerPassword" placeholder="Create a password (min 12 characters)" autocomplete="new-password">
+                <input type="password" id="registerPassword" placeholder="Create a password (min 12 characters)"
+                       autocomplete="new-password">
             </div>
             <div class="input-group">
                 <label>Confirm Password</label>
-                <input type="password" id="registerConfirm" placeholder="Confirm your password" autocomplete="new-password">
+                <input type="password" id="registerConfirm" placeholder="Confirm your password"
+                       autocomplete="new-password">
             </div>
             <div class="input-group">
                 <label>Email</label>
-                <input id="registerEmail" type="email" placeholder="Email address" required />
+                <input id="registerEmail" type="email" placeholder="Email address" required/>
             </div>
             <button class="submit-btn" id="registerBtn">
                 Create Account
@@ -817,14 +938,16 @@
         <div class="header">
             <h2>SecureChat</h2>
             <div class="header-icons">
-                <button id="settingsBtn">⚙️</button>
+                <button id="settingsBtn">⋮</button>
             </div>
         </div>
 
         <!-- Settings Menu -->
         <div id="settingsMenu" class="settings-menu">
-            <button id="changePasswordMenuBtn">🔒 Change Password</button>
-            <button id="logoutMenuBtn">🚪 Logout</button>
+            <div class="settings-item" id="profileMenuBtn">Profile</div>
+            <div class="settings-item" id="settingsMenuBtn">Settings</div>
+            <div class="settings-item" id="changePasswordMenuBtn">Change Password</div>
+            <div class="settings-item" id="logoutMenuBtn">Logout</div>
         </div>
 
         <div class="search-bar">
@@ -850,15 +973,17 @@
                 </div>
             </div>
             <div class="chat-header-right">
+                <button id="startVideoCallBtn">📹</button>
                 <button id="chatSettingsBtn">⋮</button>
             </div>
         </div>
 
         <!-- Chat Settings Menu -->
         <div id="chatSettingsMenu" class="settings-menu">
-            <button id="clearChatBtn">🗑️ Clear Chat</button>
-            <button id="muteBtn">🔕 Mute</button>
-            <button id="blockBtn">🚫 Block</button>
+            <div class="settings-item" id="contactInfoBtn">Contact Info</div>
+            <div class="settings-item" id="muteBtn">Mute</div>
+            <div class="settings-item" id="clearChatBtn">Clear Chat</div>
+            <div class="settings-item" id="blockBtn">Block</div>
         </div>
 
         <div id="typingIndicator" class="typing-indicator">
@@ -870,13 +995,33 @@
         </div>
 
         <div class="input-area">
-                <textarea
-                        id="messageInput"
-                        class="message-input"
-                        placeholder="Message"
-                        rows="1"
-                ></textarea>
+            <button class="attach-btn" id="attachBtn">📎</button>
+            <textarea
+                    id="messageInput"
+                    class="message-input"
+                    placeholder="Message"
+                    rows="1"
+            ></textarea>
             <button class="send-btn" id="sendBtn">➤</button>
+        </div>
+        <!-- Attachment Menu -->
+        <div class="attachment-menu" id="attachmentMenu">
+            <div class="attachment-item" id="attachDoc">
+                <div class="attachment-icon document">📄</div>
+                <div class="attachment-label">Document</div>
+            </div>
+            <div class="attachment-item" id="attachCamera">
+                <div class="attachment-icon camera">📷</div>
+                <div class="attachment-label">Camera</div>
+            </div>
+            <div class="attachment-item" id="attachGallery">
+                <div class="attachment-icon gallery">🖼️</div>
+                <div class="attachment-label">Gallery</div>
+            </div>
+            <div class="attachment-item" id="attachLocation">
+                <div class="attachment-icon location">📍</div>
+                <div class="attachment-label">Location</div>
+            </div>
         </div>
     </div>
 </div>
@@ -914,7 +1059,7 @@
         </p>
         <div class="input-group">
             <label>OTP</label>
-            <input id="otpInput" class="input-group" maxlength="6" placeholder="Enter OTP" />
+            <input id="otpInput" class="input-group" maxlength="6" placeholder="Enter OTP"/>
         </div>
         <div class="modal-buttons">
             <button id="verifyOtpBtn" class="btn-primary">Verify</button>

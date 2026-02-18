@@ -270,11 +270,11 @@ async function handleLogin() {
         const data = await response.json();
 
         if (response.ok) {
-            if(data.status === 'pending_verification'){
-                showStatus('authStatus', data.message , false);
+            if (data.status === 'pending_verification') {
+                showStatus('authStatus', data.message, false);
                 // Redirect to verification page or modal
                 openOTPVerification(username);
-            }else{
+            } else {
                 showStatus('authStatus', 'Decrypting vault...', false);
 
                 const storageKey = await CryptoManager.deriveStorageKey(username, password);
@@ -369,6 +369,16 @@ document.addEventListener('click', (e) => {
 });
 
 // ==================== PASSWORD CHANGE ====================
+function showProfileModal() {
+    document.getElementById('profileModal').classList.add('show');
+    closeSettings();
+}
+
+function showSettingsModal() {
+    document.getElementById('settingsModal').classList.add('show');
+    closeSettings();
+}
+
 function showChangePasswordModal() {
     document.getElementById('passwordModal').classList.add('show');
     closeSettings();
@@ -1026,6 +1036,10 @@ function handleMessageKeydown(event) {
 
 // ==================== CHAT SETTINGS ====================
 
+function startVideoCall() {
+    alert('startVideoCall');
+}
+
 function toggleChatSettings() {
     const menu = document.getElementById('chatSettingsMenu');
     menu.classList.toggle('show');
@@ -1059,16 +1073,16 @@ function updateChatSettingsMenu() {
 
     // Update mute button
     if (mutedUsers.includes(currentRecipient)) {
-        muteBtn.textContent = '🔔 Unmute';
+        muteBtn.textContent = 'Unmute';
     } else {
-        muteBtn.textContent = '🔕 Mute';
+        muteBtn.textContent = 'Mute';
     }
 
     // Update block button
     if (blockedUsers.includes(currentRecipient)) {
-        blockBtn.textContent = '✅ Unblock';
+        blockBtn.textContent = 'Unblock';
     } else {
-        blockBtn.textContent = '🚫 Block';
+        blockBtn.textContent = 'Block';
     }
 }
 
@@ -1112,6 +1126,12 @@ async function clearChat() {
         alert('Error clearing chat');
     }
 }
+
+async function showContactInfoModal() {
+    document.getElementById('settingsModal').classList.add('show');
+    closeSettings();
+}
+
 
 async function toggleMute() {
     if (!currentRecipient) return;
@@ -1198,6 +1218,147 @@ async function toggleBlock() {
     }
 }
 
+
+// Toggle attachment menu
+function attachDoc() {
+    handleAttachment('document');
+}
+
+function attachCamera() {
+    handleAttachment('camera');
+}
+
+function attachGallery() {
+    handleAttachment('gallery');
+}
+
+function attachLocation() {
+    handleAttachment('location');
+}
+
+function toggleAttachmentMenu() {
+    const attachmentMenu = document.getElementById('attachmentMenu');
+    attachmentMenu.classList.toggle('show');
+
+    if (attachmentMenu.classList.contains('show')) {
+        setTimeout(() => {
+            document.addEventListener('click', closeAttachmentOnClickOutside);
+        }, 0);
+    }
+}
+
+// Close attachment menu on click outside
+function closeAttachmentOnClickOutside(event) {
+    const attachmentMenu = document.getElementById('attachmentMenu');
+    if (!event.target.closest('.attach-btn') && !event.target.closest('.attachment-menu')) {
+        attachmentMenu.classList.remove('show');
+        document.removeEventListener('click', closeAttachmentOnClickOutside);
+    }
+}
+
+// Handle attachment selection
+function handleAttachment(type) {
+    const attachmentMenu = document.getElementById('attachmentMenu');
+    attachmentMenu.classList.remove('show');
+
+    const messagesContainer = document.getElementById('messagesContainer');
+    const currentTime = new Date();
+    const timestamp = currentTime.toLocaleTimeString('en-US', {
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
+    });
+
+    let attachmentText = '';
+    let emoji = '';
+
+    switch (type) {
+        case 'document':
+            attachmentText = '📄 Document_2024.pdf';
+            emoji = '📄';
+            break;
+        case 'camera':
+            attachmentText = '📷 Photo captured';
+            emoji = '📷';
+            break;
+        case 'gallery':
+            attachmentText = '🖼️ Image_001.jpg';
+            emoji = '🖼️';
+            break;
+        case 'location':
+            attachmentText = '📍 Current Location';
+            emoji = '📍';
+            break;
+    }
+
+    const newMessage = {
+        id: currentUser.messages.length + 1,
+        text: attachmentText,
+        sender: 'sent',
+        timestamp: timestamp,
+        date: 'Today'
+    };
+
+    currentUser.messages.push(newMessage);
+    currentUser.lastMessage = `You: ${emoji} ${type}`;
+    currentUser.lastMessageTime = timestamp;
+
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'message sent';
+
+    messageDiv.innerHTML = `
+                <div class="message-bubble">
+                    <div class="message-text">${attachmentText}</div>
+                    <div class="message-timestamp">${timestamp}</div>
+                </div>
+            `;
+
+    messagesContainer.appendChild(messageDiv);
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+
+    console.log(`${emoji} ${type.charAt(0).toUpperCase() + type.slice(1)} sent successfully`);
+
+    setTimeout(() => {
+        const replyTexts = {
+            'document': 'Thanks for the document!',
+            'camera': 'Nice photo!',
+            'gallery': 'Great picture!',
+            'location': 'Got your location, thanks!'
+        };
+
+        const replyTime = new Date();
+        const replyTimestamp = replyTime.toLocaleTimeString('en-US', {
+            hour: 'numeric',
+            minute: '2-digit',
+            hour12: true
+        });
+
+        const replyMessage = {
+            id: currentUser.messages.length + 1,
+            text: replyTexts[type],
+            sender: 'received',
+            timestamp: replyTimestamp,
+            date: 'Today'
+        };
+
+        currentUser.messages.push(replyMessage);
+
+        const replyDiv = document.createElement('div');
+        replyDiv.className = 'message received';
+
+        replyDiv.innerHTML = `
+                    <div class="message-bubble">
+                        <div class="message-text">${replyTexts[type]}</div>
+                        <div class="message-timestamp">${replyTimestamp}</div>
+                    </div>
+                `;
+
+        messagesContainer.appendChild(replyDiv);
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }, 1500);
+}
+
+
 // ==================== INITIALIZATION ====================
 document.addEventListener('DOMContentLoaded', () => {
     console.log('SecureChat E2EE Messenger Loaded');
@@ -1230,6 +1391,8 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('settingsBtn').addEventListener('click', toggleSettings);
 
     // Settings menu items
+    document.getElementById('profileMenuBtn').addEventListener('click', showProfileModal);
+    document.getElementById('settingsMenuBtn').addEventListener('click', showSettingsModal);
     document.getElementById('changePasswordMenuBtn').addEventListener('click', showChangePasswordModal);
     document.getElementById('logoutMenuBtn').addEventListener('click', handleLogout);
 
@@ -1242,13 +1405,22 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('backBtn').addEventListener('click', backToUserList);
 
     // Chat settings button
+    document.getElementById('startVideoCallBtn').addEventListener('click', startVideoCall);
     document.getElementById('chatSettingsBtn').addEventListener('click', toggleChatSettings);
 
     // Chat settings menu items
-    document.getElementById('clearChatBtn').addEventListener('click', clearChat);
+    document.getElementById('contactInfoBtn').addEventListener('click', showContactInfoModal);
     document.getElementById('muteBtn').addEventListener('click', toggleMute);
+    document.getElementById('clearChatBtn').addEventListener('click', clearChat);
     document.getElementById('blockBtn').addEventListener('click', toggleBlock);
 
+    // Attach button
+    document.getElementById('attachBtn').addEventListener('click', toggleAttachmentMenu);
+
+    document.getElementById('attachDoc').addEventListener('click', attachDoc);
+    document.getElementById('attachCamera').addEventListener('click', attachCamera);
+    document.getElementById('attachGallery').addEventListener('click', attachGallery);
+    document.getElementById('attachLocation').addEventListener('click', attachLocation);
     // Send button
     document.getElementById('sendBtn').addEventListener('click', sendMessage);
 
