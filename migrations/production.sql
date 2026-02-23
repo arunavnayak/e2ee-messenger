@@ -97,3 +97,13 @@ CREATE INDEX IF NOT EXISTS idx_verifications_email
     ON user_verifications (email);
 
 -- ===============================================================
+CREATE TABLE IF NOT EXISTS message_reactions (
+    id SERIAL PRIMARY KEY,
+    message_id INTEGER NOT NULL REFERENCES pending_messages(id) ON DELETE CASCADE,
+    username VARCHAR(32) NOT NULL,
+    emoji VARCHAR(16) NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+CREATE INDEX IF NOT EXISTS idx_reactions_message_id
+    ON message_reactions(message_id);

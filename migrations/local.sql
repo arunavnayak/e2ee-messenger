@@ -36,3 +36,15 @@ CREATE TABLE IF NOT EXISTS user_verifications (
     expires_at TIMESTAMP NOT NULL
     );
 
+CREATE TABLE IF NOT EXISTS message_reactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id INTEGER NOT NULL,
+    username TEXT NOT NULL,
+    emoji TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (message_id) REFERENCES pending_messages(id)
+    );
+
+CREATE INDEX IF NOT EXISTS idx_reactions_message_id
+    ON message_reactions(message_id);
+

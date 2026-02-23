@@ -82,3 +82,14 @@ class UserVerification(Base):
     otp_code = Column(String(6), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     expires_at = Column(DateTime(timezone=True), nullable=False)
+
+
+# models.py
+class MessageReaction(Base):
+    __tablename__ = "message_reactions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    message_id = Column(Integer, ForeignKey("pending_messages.id"), index=True, nullable=False)
+    username = Column(String(32), index=True, nullable=False)  # who reacted
+    emoji = Column(String(16), nullable=False)                 # e.g. "👍", "😂"
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

@@ -23,6 +23,7 @@ from models import (
     SessionToken,
     UserPreferences,
     UserVerification,
+    MessageReaction
 )
 from rate_limiter import RateLimitMiddleware, login_rate_limiter, ws_rate_limiter
 from status import router as status_router
@@ -571,18 +572,32 @@ async def get_chat_history(username: str, contact: str, db: Session = Depends(ge
         )
     ).order_by(PendingMessage.timestamp).all()
 
-    chat_history = [
-        {
+    # fetch reactions for these messages
+    message_ids = [m.id for m in messages]
+    reactions = db.query(MessageReaction).filter(
+        MessageReaction.message_id.in_(message_ids)
+    ).all()
+
+    reactions_by_msg = {}
+    for r in reactions:
+        reactions_by_msg.setdefault(r.message_id, []).append({
+            "username": r.username,
+            "emoji": r.emoji,
+            "timestamp": r.created_at.isoformat(timespec="milliseconds"),
+        })
+
+    chat_history = []
+    for msg in messages:
+        chat_history.append({
+            "id": msg.id,
             "from": msg.from_username,
             "to": msg.to_username,
             "payload": msg.encrypted_payload,
             "timestamp": msg.timestamp.isoformat(timespec="milliseconds"),
             "read": msg.read,
-            # Indicate if this message was sent by the requesting user
-            "is_sent": msg.from_username == username
-        }
-        for msg in messages
-    ]
+            "is_sent": msg.from_username == username,
+            "reactions": reactions_by_msg.get(msg.id, []),
+        })
 
     return {
         "status": "success",
@@ -988,6 +1003,54 @@ async def websocket_endpoint(websocket: WebSocket, username: str):
                     },
                     data["to"]
                 )
+
+            # Emoji Reaction
+            elif data.get("type") == "reaction":
+                # optional: rate limit reactions too
+                if not ws_rate_limiter.check_message(username):
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "Reaction rate limit exceeded. Please slow down."
+                    })
+                    continue
+
+                message_id = data.get("message_id")
+                emoji = data.get("emoji")
+                to_user = data.get("to")      # recipient of the original message
+                from_user = data.get("from")  # reactor
+
+                if from_user != username:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "Sender mismatch"
+                    })
+                    continue
+
+                # Persist reaction
+                try:
+                    reaction = MessageReaction(
+                        message_id=message_id,
+                        username=from_user,
+                        emoji=emoji,
+                    )
+                    db.add(reaction)
+                    db.commit()
+                except Exception as e:
+                    print(f"Error saving reaction: {e}")
+                    db.rollback()
+                    continue
+
+                # Notify both sides
+                payload = {
+                    "type": "reaction",
+                    "message_id": message_id,
+                    "from": from_user,
+                    "to": to_user,
+                    "emoji": emoji,
+                    "timestamp": datetime.now(UTC).isoformat(timespec="milliseconds"),
+                }
+                await manager.send_personal_message(payload, to_user)
+                await manager.send_personal_message(payload, from_user)
 
     except WebSocketDisconnect:
         manager.disconnect(username)

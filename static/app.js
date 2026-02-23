@@ -654,6 +654,8 @@ function connectWebSocket() {
             }
         } else if (data.type === 'message') {
             await handleIncomingMessage(data);
+        } else if (data.type === 'reaction') {
+            applyIncomingReaction(data);
         } else if (data.type === 'delivery_status') {
             updateMessageStatus(data.message_id, data.status);
         } else if (data.type === 'read_receipt') {
@@ -683,6 +685,113 @@ function connectWebSocket() {
         }
     };
 }
+
+function applyIncomingReaction(data) {
+    const { message_id, emoji, from } = data;
+    const chat = chatHistory[currentRecipient] || chatHistory[from] || [];
+    const msg = chat.find(m => m.messageId === message_id);
+    if (!msg) return;
+
+    msg.reactions = msg.reactions || [];
+    msg.reactions.push({ username: from, emoji });
+
+    // Update DOM
+    const messagesArea = document.getElementById('messagesArea');
+    const el = messagesArea.querySelector(`[data-message-id="${message_id}"]`);
+    if (!el) return;
+
+    const bubble = el.querySelector('.message-bubble');
+    let reactionsDiv = bubble.querySelector('.message-reactions');
+    if (!reactionsDiv) {
+        reactionsDiv = document.createElement('div');
+        reactionsDiv.className = 'message-reactions';
+        bubble.insertBefore(reactionsDiv, bubble.querySelector('.message-footer'));
+    }
+    const span = document.createElement('span');
+    span.className = 'reaction-emoji';
+    span.textContent = emoji;
+    reactionsDiv.appendChild(span);
+}
+
+
+// ====== EMOJI PICKER =====
+// const EMOJI_SET = ['😀','😁','😂','🤣','😊','😍','😎','😢','😡','👍','🙏','🔥','🎉','❤️'];
+const EMOJI_SET = [
+    // 😀 Smileys & Emotion
+    "😀","😄","😁","😆","😂","🤣","😊","😇","🙂","🙃",
+    "😍","🥰","😘","🤓","😎","😞","☹️","🥺","😢","😭",
+    "😤","😠","😡","🤬","🤯","🥶","😱","😥","😵‍💫","🤧",
+    "😷","🤑","👿","👹","👺","💀","☠️","👻","👽","🤖",
+
+    // 👍 Gestures
+    "👍","👎","👌","✌️","🤞","👋","🤚","🤲","🙏","💪",
+
+    // ❤️ Hearts & Love
+    "❤️","💔","❣️","💕","💞","💓","💖","💘","💝","💟",
+
+    // 🐶 Animals
+    "🐶","🐱","🐰","🐻","🐼","🐨","🐯","🦁","🐷","🐸",
+    "🐵","🐔","🐧","🐤","🦉","🐺","🐟","🐬","🐳","🐋",
+
+    // 🍔 Food & Drink
+    "🍏","🍎","🍐","🍋","🍌","🍉","🍇","🍓","🍒","🍆",
+    "🥑","🥦","🥕","🌽","🥨","🥯","🍔","🍟","🍕","🥪",
+    "🍩","🍪","🎂","🍰","🍬","🍭","🍺","🍷","🥂","🍸",
+
+    // ⚽ Activities
+    "⚽","🏀","🏈","⚾","🏏","🚴","🚗","🚕","🚒","✈️",
+    "🚀","🛸","⛵","🚢","🚤","🗽","🗼","🏰","🎡","🎠",
+
+    // 🔣 Symbols
+    "✨","⭐","🌟","💫","🔥","💥","🌈","☀️","🌤️","🌧️",
+    "❄️","☃️","💦","🌊","🌙","🌛","🌜","⭐","⚡","💤",
+];
+
+let emojiPickerEl = null;
+
+document.getElementById('emojiBtn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleEmojiPicker();
+});
+
+function toggleEmojiPicker() {
+    if (emojiPickerEl) {
+        emojiPickerEl.remove();
+        emojiPickerEl = null;
+        return;
+    }
+    const picker = document.createElement('div');
+    picker.className = 'emoji-picker';
+    picker.innerHTML = EMOJI_SET.map(e => `<span>${e}</span>`).join('');
+    picker.addEventListener('click', (e) => {
+        if (e.target.tagName === 'SPAN') {
+            insertEmoji(e.target.textContent);
+        }
+    });
+    document.body.appendChild(picker);
+    emojiPickerEl = picker;
+    document.addEventListener('click', closeEmojiPickerOnce, { once: true });
+}
+
+function closeEmojiPickerOnce() {
+    if (emojiPickerEl) {
+        emojiPickerEl.remove();
+        emojiPickerEl = null;
+    }
+}
+
+function insertEmoji(emoji) {
+    const input = document.getElementById('messageInput');
+    const start = input.selectionStart;
+    const end = input.selectionEnd;
+    const value = input.value;
+    input.value = value.slice(0, start) + emoji + value.slice(end);
+    input.focus();
+    const pos = start + emoji.length;
+    input.setSelectionRange(pos, pos);
+}
+
+
 
 // ==================== CONTACTS ====================
 async function loadContacts() {
@@ -818,8 +927,10 @@ async function openChat(username) {
                         text: decrypted,
                         type: messageType,
                         timestamp: serverTimestamp,
-                        messageId: `server_${msg.timestamp}`,
-                        status: msg.is_sent ? 'delivered' : null
+                        // messageId: `server_${msg.timestamp}`,
+                        messageId: msg.id, // use DB id
+                        status: msg.is_sent ? 'delivered' : null,
+                        reactions: msg.reactions || [], // new
                     });
 
                 } catch (error) {
@@ -882,6 +993,26 @@ function backToUserList() {
     hideTypingIndicator();
 }
 
+// function createMessageElement(msg) {
+//     const messageDiv = document.createElement('div');
+//     messageDiv.className = `message ${msg.type}`;
+//     messageDiv.dataset.messageId = msg.messageId;
+//
+//     const statusIcon = getStatusIcon(msg.status);
+//
+//     messageDiv.innerHTML = `
+//         <div class="message-bubble">
+//             <div class="message-text ${msg.text.includes('...') ? 'encrypted' : ''}">${msg.text}</div>
+//             <div class="message-footer">
+//                 <span>${formatTime(msg.timestamp)}</span>
+//                 ${msg.type === 'sent' ? `<span class="message-status">${statusIcon}</span>` : ''}
+//             </div>
+//         </div>
+//     `;
+//
+//     return messageDiv;
+// }
+
 function createMessageElement(msg) {
     const messageDiv = document.createElement('div');
     messageDiv.className = `message ${msg.type}`;
@@ -889,18 +1020,83 @@ function createMessageElement(msg) {
 
     const statusIcon = getStatusIcon(msg.status);
 
+    const reactionsHtml = (msg.reactions && msg.reactions.length > 0)
+        ? `<div class="message-reactions">
+         ${msg.reactions.map(r => `<span class="reaction-emoji">${r.emoji}</span>`).join('')}
+       </div>`
+        : '';
+
     messageDiv.innerHTML = `
-        <div class="message-bubble">
-            <div class="message-text ${msg.text.includes('...') ? 'encrypted' : ''}">${msg.text}</div>
-            <div class="message-footer">
-                <span>${formatTime(msg.timestamp)}</span>
-                ${msg.type === 'sent' ? `<span class="message-status">${statusIcon}</span>` : ''}
-            </div>
+    <div class="message-bubble"> 
+        <div class="message-text ${msg.text.includes('...') ? 'encrypted' : ''}"> ${msg.text} </div>
+        ${reactionsHtml}
+        <div class="message-footer">
+            <span>${formatTime(msg.timestamp)}</span>
+            ${msg.type === 'sent' ? `<span class="message-status">${statusIcon}</span>` : ''}
         </div>
+    </div>
     `;
+
+    // Click to open quick reaction bar for messages from others
+    if (msg.type === 'received') {
+        messageDiv.addEventListener('click', () => openReactionPicker(messageDiv));
+    }
 
     return messageDiv;
 }
+
+// ============= Message Reactions =============
+const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🔥'];
+let currentReactionPicker = null;
+
+function openReactionPicker(messageEl) {
+    if (currentReactionPicker) {
+        currentReactionPicker.remove();
+        currentReactionPicker = null;
+    }
+
+    const picker = document.createElement('div');
+    picker.className = 'reaction-picker';
+    picker.innerHTML = QUICK_REACTIONS.map(e => `<span>${e}</span>`).join('');
+
+    picker.addEventListener('click', (e) => {
+        if (e.target.tagName === 'SPAN') {
+            const emoji = e.target.textContent;
+            sendReaction(messageEl.dataset.messageId, emoji);
+        }
+    });
+
+    document.body.appendChild(picker);
+    const rect = messageEl.getBoundingClientRect();
+    picker.style.left = `${rect.left + rect.width / 2 - picker.offsetWidth / 2}px`;
+    picker.style.top = `${rect.top - 40}px`;
+
+    currentReactionPicker = picker;
+    setTimeout(() => {
+        document.addEventListener('click', closeReactionPickerOnce, { once: true });
+    }, 0);
+}
+
+function closeReactionPickerOnce() {
+    if (currentReactionPicker) {
+        currentReactionPicker.remove();
+        currentReactionPicker = null;
+    }
+}
+
+function sendReaction(messageId, emoji) {
+    if (!websocket || websocket.readyState !== WebSocket.OPEN || !currentRecipient) return;
+
+    websocket.send(JSON.stringify({
+        type: 'reaction',
+        from: currentUser,
+        to: currentRecipient,
+        message_id: Number(messageId),
+        emoji,
+    }));
+}
+
+
 
 function getStatusIcon(status) {
     switch (status) {

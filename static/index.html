@@ -461,6 +461,60 @@
             box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
         }
 
+        .message-reactions {
+            margin-top: 4px;
+            display: flex;
+            gap: 4px;
+            flex-wrap: wrap;
+        }
+
+        .reaction-emoji {
+            font-size: 14px;
+            padding: 2px 6px;
+            border-radius: 10px;
+            background: rgba(0,0,0,0.05);
+        }
+        .reaction-picker {
+            position: absolute;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            padding: 6px 8px;
+            display: flex;
+            gap: 6px;
+            z-index: 200;
+        }
+        .reaction-picker span {
+            cursor: pointer;
+            font-size: 18px;
+        }
+
+        .emoji-btn {
+            background: none;
+            border: none;
+            font-size: 22px;
+            cursor: pointer;
+            padding: 5px;
+        }
+        .emoji-picker {
+            position: absolute;
+            bottom: 65px;
+            right: 60px;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            padding: 8px;
+            display: grid;
+            grid-template-columns: repeat(10, 1fr);
+            gap: 6px;
+            z-index: 150;
+        }
+        .emoji-picker span {
+            cursor: pointer;
+            font-size: 20px;
+        }
+
+
         .message-text {
             margin-bottom: 2px;
             font-size: 15px;
@@ -996,6 +1050,7 @@
 
         <div class="input-area">
             <button class="attach-btn" id="attachBtn">📎</button>
+            <button class="emoji-btn" id="emojiBtn">😊</button>
             <textarea
                     id="messageInput"
                     class="message-input"
