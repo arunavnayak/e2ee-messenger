@@ -138,6 +138,17 @@ function clearStatus(elementId) {
     el.textContent = '';
 }
 
+function linkify(text) {
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
+
+    return text.replace(urlRegex, (url) => {
+        // Escape HTML entities inside URL text
+        const safeUrl = url.replace(/"/g, "&quot;");
+        return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${safeUrl}</a>`;
+    });
+}
+
+
 // ==================== TAB SWITCHING ====================
 function switchTab(tab) {
     const loginForm = document.getElementById('loginForm');
@@ -1011,8 +1022,6 @@ function backToUserList() {
     hideTypingIndicator();
 }
 
-
-/*
 function createMessageElement(msg) {
     const messageDiv = document.createElement('div');
     messageDiv.className = `message ${msg.type}`;
@@ -1020,47 +1029,8 @@ function createMessageElement(msg) {
 
     const statusIcon = getStatusIcon(msg.status);
 
-    const reactionsHtml = (msg.reactions && msg.reactions.length > 0)
-        ? `<div class="message-reactions">
-         ${msg.reactions.map(r => `<span class="reaction-emoji">${r.emoji}</span>`).join('')}
-       </div>`
-        : '';
-
-    messageDiv.innerHTML = `
-    <div class="message-bubble"> 
-        <div class="message-text ${msg.text.includes('...') ? 'encrypted' : ''}"> ${msg.text} </div>
-        ${reactionsHtml}
-        <div class="message-footer">
-            <span>${formatTime(msg.timestamp)}</span>
-            ${msg.type === 'sent' ? `<span class="message-status">${statusIcon}</span>` : ''}
-        </div>
-    </div>
-    `;
-
-    // Click to open quick reaction bar for messages from others
-    // if (msg.type === 'received') {
-    //     messageDiv.addEventListener('click', () => openReactionPicker(messageDiv));
-    // }
-    if (msg.type === 'received') {
-        addLongPressListener(messageDiv, () => openReactionPicker(messageDiv));
-
-        // Desktop fallback
-        messageDiv.addEventListener('contextmenu', (e) => {
-            e.preventDefault();
-            openReactionPicker(messageDiv);
-        });
-    }
-
-
-    return messageDiv;
-}
-*/
-function createMessageElement(msg) {
-    const messageDiv = document.createElement('div');
-    messageDiv.className = `message ${msg.type}`;
-    messageDiv.dataset.messageId = msg.messageId;
-
-    const statusIcon = getStatusIcon(msg.status);
+    // --- UPDATED: convert URLs to clickable links ---
+    const safeText = linkify(msg.text);
 
     // --- UPDATED: group reactions by emoji + count ---
     let reactionsHtml = '';
@@ -1087,7 +1057,7 @@ function createMessageElement(msg) {
     messageDiv.innerHTML = `
     <div class="message-bubble"> 
         <div class="message-text ${msg.text.includes('...') ? 'encrypted' : ''}">
-            ${msg.text}
+            ${safeText}
         </div>
         ${reactionsHtml}
         <div class="message-footer">
