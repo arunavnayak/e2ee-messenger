@@ -463,8 +463,12 @@ async function restoreSessionFromServer(username, token, password) {
         await loadContacts();
 
     } catch (err) {
-        console.error("Error restoring session:", err);
+        console.warn('Error restoring session::', err);
+
         sessionStorage.clear();
+        const restoreSession = document.getElementById('restoreSessionModal');
+        restoreSession.style.display = 'none';
+        location.reload();
     }
 }
 
