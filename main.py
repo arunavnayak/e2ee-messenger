@@ -5,6 +5,7 @@ import os
 from datetime import datetime, timedelta, UTC
 from typing import Dict
 
+import requests
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Request, status
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -15,17 +16,32 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 # Local Imports
 from database import engine, get_db, Base, SessionLocal
-from models import User, EncryptedVault, PendingMessage, SessionToken, UserPreferences, UserVerification
+from models import (
+    User,
+    EncryptedVault,
+    PendingMessage,
+    SessionToken,
+    UserPreferences,
+    UserVerification,
+)
 from rate_limiter import RateLimitMiddleware, login_rate_limiter, ws_rate_limiter
 from status import router as status_router
-
 from email_utils import send_otp_email
 import random
+
+# ==================== CONFIG ====================
+
+PIPEDREAM_WEBHOOK_URL = os.getenv("PIPEDREAM_WEBHOOK_URL")
+NOTIFICATION_FOR_USER = os.getenv("NOTIFICATION_FOR_USER")
+NOTIFICATION_COOLDOWN_MINUTES = os.getenv("NOTIFICATION_COOLDOWN_MINUTES")
+
+# Track last notification time per user (e.g., "Arunav")
+last_notification_times: Dict[str, datetime] = {}
 
 # Initialize Database
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="E2EE Messenger", version="2.0.0")
+app = FastAPI(title="E2EE Messenger", version="2.1.0")
 
 # Include routers
 app.include_router(status_router)
@@ -69,6 +85,75 @@ def is_user_blocked(blocker: str, blockee: str, db: Session) -> bool:
     return blockee in blocked_list
 
 
+# ==================== NOTIFICATION UTILITIES ====================
+
+def should_send_notification(username: str) -> bool:
+    """Check cooldown for notifications for a given username"""
+    now = datetime.now(UTC)
+    last = last_notification_times.get(username)
+    if not last:
+        return True
+    return (now - last) >= timedelta(minutes=NOTIFICATION_COOLDOWN_MINUTES)
+
+
+def record_notification_sent(username: str) -> None:
+    """Record that a notification was sent now"""
+    last_notification_times[username] = datetime.now(UTC)
+
+
+def send_pipedream_notification(caller: str, message: str) -> None:
+    """Send notification to Pipedream webhook if configured"""
+    if not PIPEDREAM_WEBHOOK_URL:
+        return
+    try:
+        payload = {
+            "caller": caller,
+            "message": message,
+        }
+        headers = {"Content-Type": "application/json"}
+        requests.post(PIPEDREAM_WEBHOOK_URL, json=payload, headers=headers, timeout=5)
+    except Exception as e:
+        # Log and continue; notification failures shouldn't break chat
+        print("Pipedream notification error:", e)
+
+
+def trigger_new_message_notification_if_needed(
+    db: Session,
+    to_username: str,
+    from_username: str,
+    recipient_online: bool,
+):
+    """
+    Trigger notification for user 'NOTIFICATION_FOR_USER' (case-insensitive) if:
+    - recipient is 'NOTIFICATION_FOR_USER'
+    - recipient is offline (or message queued)
+    - cooldown window has passed
+    """
+    if to_username.lower() != NOTIFICATION_FOR_USER:
+        return
+
+    if recipient_online:
+        # Requirement: notify when user not online or has not read.
+        # At send time, "not online" is approximated by !recipient_online.
+        return
+
+    if not should_send_notification(NOTIFICATION_FOR_USER):
+        return
+
+    # Count unread messages for NOTIFICATION_FOR_USER
+    unread_count = db.query(PendingMessage).filter(
+        PendingMessage.to_username == to_username,
+        PendingMessage.read == False,  # noqa: E712
+    ).count()
+
+    if unread_count <= 0:
+        return
+
+    message_text = f"{unread_count} new message" if unread_count == 1 else f"{unread_count} new messages"
+    send_pipedream_notification(caller=from_username, message=message_text)
+    record_notification_sent(NOTIFICATION_FOR_USER)
+
+
 # ==================== WEBSOCKET CONNECTION MANAGER ====================
 
 class ConnectionManager:
@@ -88,8 +173,7 @@ class ConnectionManager:
             try:
                 await self.active_connections[username].send_json(message)
                 return True
-            except:
-                # Connection might be dead, remove it
+            except Exception:
                 self.disconnect(username)
                 return False
         return False
@@ -138,19 +222,20 @@ app.add_middleware(RateLimitMiddleware)
 
 class RegisterRequest(BaseModel):
     username: str
-    email: str  # ✅ new field
+    email: str
     auth_hash: str
     public_key: str
     encrypted_vault: str
 
-    @field_validator('username')
+    @field_validator("username")
     @classmethod
     def validate_username(cls, v):
         if not v or len(v) < 3 or len(v) > 32:
-            raise ValueError('Username must be 3-32 characters')
+            raise ValueError("Username must be 3-32 characters")
         if not v.isalnum():
-            raise ValueError('Username must be alphanumeric')
+            raise ValueError("Username must be alphanumeric")
         return v
+
     @field_validator("email")
     @classmethod
     def validate_email(cls, v):
@@ -162,6 +247,7 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     username: str
     auth_hash: str
+
 
 class OTPRequest(BaseModel):
     username: str
@@ -207,7 +293,6 @@ async def register(req: RegisterRequest, db: Session = Depends(get_db)):
     """
     Step 1: Register user and send OTP to email using Brevo (no‑reply)
     """
-
     if db.query(User).filter(User.username == req.username).first():
         raise HTTPException(status_code=400, detail="Username already exists")
 
@@ -225,7 +310,8 @@ async def register(req: RegisterRequest, db: Session = Depends(get_db)):
     db.add(user)
 
     vault = EncryptedVault(
-        username=req.username, encrypted_vault_blob=req.encrypted_vault
+        username=req.username,
+        encrypted_vault_blob=req.encrypted_vault
     )
     db.add(vault)
     db.commit()
@@ -234,18 +320,18 @@ async def register(req: RegisterRequest, db: Session = Depends(get_db)):
     otp = "".join(random.choices("0123456789", k=6))
     exp_time = datetime.now(UTC) + timedelta(minutes=10)
 
-    # If previous verification exists, delete it
-    old = (
-        db.query(UserVerification)
-        .filter(UserVerification.username == req.username)
-        .first()
-    )
+    old = db.query(UserVerification).filter(
+        UserVerification.username == req.username
+    ).first()
     if old:
         db.delete(old)
         db.commit()
 
     verification = UserVerification(
-        username=req.username, email=req.email, otp_code=otp, expires_at=exp_time
+        username=req.username,
+        email=req.email,
+        otp_code=otp,
+        expires_at=exp_time
     )
     db.add(verification)
     db.commit()
@@ -261,6 +347,7 @@ async def register(req: RegisterRequest, db: Session = Depends(get_db)):
         "username": req.username,
         "message": f"OTP sent to {req.email}",
     }
+
 
 @app.post("/api/login")
 async def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
@@ -300,7 +387,9 @@ async def login(req: LoginRequest, request: Request, db: Session = Depends(get_d
     # Clear failed attempts on successful login
     login_rate_limiter.clear_attempts(identifier)
 
-    vault = db.query(EncryptedVault).filter(EncryptedVault.username == req.username).first()
+    vault = db.query(EncryptedVault).filter(
+        EncryptedVault.username == req.username
+    ).first()
 
     # Get all messages for this user (both read and unread)
     pending = db.query(PendingMessage).filter(
@@ -318,7 +407,7 @@ async def login(req: LoginRequest, request: Request, db: Session = Depends(get_d
     ]
 
     # Calculate unread counts per sender
-    unread_counts = {}
+    unread_counts: Dict[str, int] = {}
     for msg in pending:
         if not msg.read:
             unread_counts[msg.from_username] = unread_counts.get(msg.from_username, 0) + 1
@@ -357,10 +446,90 @@ async def login(req: LoginRequest, request: Request, db: Session = Depends(get_d
     }
 
 
+"""
+    On successful /api/login, store:
+    1. username
+    2. session_token
+    3. (optionally) encrypted_vault etc. in localStorage or sessionStorage.
+    
+    On page load:
+    Check if username and session_token exist in storage.
+    1. If yes, call /api/session/restore with them.
+    2. If restore succeeds → go straight to chat UI, reconnect WebSocket using that token.
+    3. If it fails → clear storage and show login page.
+"""
+class RestoreSessionRequest(BaseModel):
+    username: str
+    session_token: str
+
+@app.post("/api/session/restore")
+async def restore_session(req: RestoreSessionRequest, db: Session = Depends(get_db)):
+    """
+    Restore a logged-in session using an existing session token.
+    Used to survive page refresh without re-entering password.
+    """
+
+    # Reuse the same verification logic as WebSocket auth
+    is_valid = await verify_websocket_token(req.username, req.session_token, db)
+    if not is_valid:
+        raise HTTPException(status_code=401, detail="Invalid or expired session token")
+
+    user = db.query(User).filter(User.username == req.username).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if not user.is_verified:
+        return {
+            "status": "pending_verification",
+            "username": req.username,
+            "message": "Account email not verified. Please verify via OTP.",
+        }
+
+    vault = db.query(EncryptedVault).filter(
+        EncryptedVault.username == req.username
+    ).first()
+
+    # Get all messages for this user (both read and unread)
+    pending = db.query(PendingMessage).filter(
+        PendingMessage.to_username == req.username
+    ).all()
+
+    pending_messages = [
+        {
+            "from": msg.from_username,
+            "payload": msg.encrypted_payload,
+            "timestamp": msg.timestamp.isoformat(timespec="milliseconds"),
+            "read": msg.read,
+        }
+        for msg in pending
+    ]
+
+    # Calculate unread counts per sender
+    unread_counts = {}
+    for msg in pending:
+        if not msg.read:
+            unread_counts[msg.from_username] = unread_counts.get(msg.from_username, 0) + 1
+
+    # Get user preferences
+    prefs = get_user_preferences(req.username, db)
+
+    return {
+        "status": "success",
+        "username": req.username,
+        "public_key": user.public_key,
+        "encrypted_vault": vault.encrypted_vault_blob,
+        "pending_messages": pending_messages,
+        "unread_counts": unread_counts,
+        "session_token": req.session_token,  # reuse existing token
+        "blocked_users": json.loads(prefs.blocked_users),
+        "muted_users": json.loads(prefs.muted_users),
+    }
+
+
+
 @app.post("/api/update-vault")
 async def update_vault(req: UpdateVaultRequest, db: Session = Depends(get_db)):
     """Update encrypted vault (password change)"""
-
     user = db.query(User).filter(User.username == req.username).first()
 
     if not user or not constant_time_compare(user.auth_hash, req.old_auth_hash):
@@ -368,7 +537,9 @@ async def update_vault(req: UpdateVaultRequest, db: Session = Depends(get_db)):
 
     user.auth_hash = req.new_auth_hash
 
-    vault = db.query(EncryptedVault).filter(EncryptedVault.username == req.username).first()
+    vault = db.query(EncryptedVault).filter(
+        EncryptedVault.username == req.username
+    ).first()
     vault.encrypted_vault_blob = req.new_encrypted_vault
 
     db.commit()
@@ -379,7 +550,6 @@ async def update_vault(req: UpdateVaultRequest, db: Session = Depends(get_db)):
 @app.get("/api/users")
 async def list_users(db: Session = Depends(get_db)):
     """List all registered users"""
-
     users = db.query(User).all()
     return {
         "users": [
@@ -428,7 +598,6 @@ class MarkReadRequest(BaseModel):
 @app.post("/api/messages/mark-read")
 async def mark_messages_read(req: MarkReadRequest, db: Session = Depends(get_db)):
     """Mark messages from a specific user as read"""
-
     db.query(PendingMessage).filter(
         PendingMessage.from_username == req.from_username,
         PendingMessage.to_username == req.to_username
@@ -437,6 +606,7 @@ async def mark_messages_read(req: MarkReadRequest, db: Session = Depends(get_db)
     db.commit()
 
     return {"status": "success", "message": "Messages marked as read"}
+
 
 @app.post("/api/chat/clear")
 async def clear_chat(req: ClearChatRequest, db: Session = Depends(get_db)):
@@ -482,7 +652,6 @@ async def get_chat_history(req: GetChatHistoryRequest, db: Session = Depends(get
 @app.post("/api/user/block")
 async def block_user(req: BlockUserRequest, db: Session = Depends(get_db)):
     """Block a user"""
-
     prefs = get_user_preferences(req.blocker, db)
     blocked_list = json.loads(prefs.blocked_users)
 
@@ -497,7 +666,6 @@ async def block_user(req: BlockUserRequest, db: Session = Depends(get_db)):
 @app.post("/api/user/unblock")
 async def unblock_user(req: BlockUserRequest, db: Session = Depends(get_db)):
     """Unblock a user"""
-
     prefs = get_user_preferences(req.blocker, db)
     blocked_list = json.loads(prefs.blocked_users)
 
@@ -512,7 +680,6 @@ async def unblock_user(req: BlockUserRequest, db: Session = Depends(get_db)):
 @app.post("/api/user/mute")
 async def mute_user(req: MuteUserRequest, db: Session = Depends(get_db)):
     """Mute a user"""
-
     prefs = get_user_preferences(req.muter, db)
     muted_list = json.loads(prefs.muted_users)
 
@@ -527,7 +694,6 @@ async def mute_user(req: MuteUserRequest, db: Session = Depends(get_db)):
 @app.post("/api/user/unmute")
 async def unmute_user(req: MuteUserRequest, db: Session = Depends(get_db)):
     """Unmute a user"""
-
     prefs = get_user_preferences(req.muter, db)
     muted_list = json.loads(prefs.muted_users)
 
@@ -542,7 +708,6 @@ async def unmute_user(req: MuteUserRequest, db: Session = Depends(get_db)):
 @app.get("/api/user/preferences/{username}")
 async def get_preferences(username: str, db: Session = Depends(get_db)):
     """Get user preferences"""
-
     prefs = get_user_preferences(username, db)
 
     return {
@@ -555,16 +720,15 @@ class VerifyOTPRequest(BaseModel):
     username: str
     otp_code: str
 
+
 @app.post("/api/verify-otp")
 async def verify_otp(req: VerifyOTPRequest, db: Session = Depends(get_db)):
     """
     Step 2: Verify OTP and mark user as verified
     """
-    record = (
-        db.query(UserVerification)
-        .filter(UserVerification.username == req.username)
-        .first()
-    )
+    record = db.query(UserVerification).filter(
+        UserVerification.username == req.username
+    ).first()
     if not record:
         raise HTTPException(status_code=404, detail="No verification record found")
 
@@ -584,7 +748,6 @@ async def verify_otp(req: VerifyOTPRequest, db: Session = Depends(get_db)):
     db.commit()
 
     return {"status": "success", "message": "Email verified successfully"}
-
 
 
 @app.post("/api/resend-otp")
@@ -620,7 +783,10 @@ async def resend_otp(req: OTPRequest, db: Session = Depends(get_db)):
     expires_at = datetime.now(UTC) + timedelta(minutes=10)
 
     record = UserVerification(
-        username=user.username, email=user.email, otp_code=otp, expires_at=expires_at
+        username=user.username,
+        email=user.email,
+        otp_code=otp,
+        expires_at=expires_at
     )
     db.add(record)
     db.commit()
@@ -776,6 +942,14 @@ async def websocket_endpoint(websocket: WebSocket, username: str):
                         "message_id": message_id
                     })
 
+                # Trigger notification for Arunav if offline / queued
+                trigger_new_message_notification_if_needed(
+                    db=db,
+                    to_username=to_user,
+                    from_username=from_user,
+                    recipient_online=delivered
+                )
+
             elif data.get("type") == "read_receipt":
                 from_user = data.get("from")
                 to_user = data.get("to")
@@ -848,6 +1022,7 @@ async def read_root():
 async def favicon():
     """Return empty response for favicon to prevent 404 errors"""
     return HTMLResponse(content="", status_code=204)
+
 
 @app.get("/health")
 async def health_check(db: Session = Depends(get_db)):

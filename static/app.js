@@ -1,12 +1,19 @@
+/************************************************************
+ *  SecureChat - Updated app.js
+ *  Option B2: Private key encrypted in sessionStorage
+ *  using PBKDF2(username + password + random salt)
+ ************************************************************/
 // ==================== GLOBAL STATE ====================
 let currentUser = null;
 let currentRecipient = null;
 let websocket = null;
 let sessionToken = null;
+
 let userKeys = {
     publicKey: null,
-    privateKey: null
+    privateKey: null // decrypted in memory only
 };
+
 let contacts = [];
 let chatHistory = {};
 let pendingMessagesStore = {};
@@ -14,6 +21,81 @@ let unreadCounts = {};
 let blockedUsers = [];
 let mutedUsers = [];
 let typingTimeout = null;
+
+// ==================== SESSION RESTORE CRYPTO HELPERS (ADDED) ====================
+
+// Convert base64 <-> ArrayBuffer
+function arrayBufferToBase64(buf) {
+    return btoa(String.fromCharCode(...new Uint8Array(buf)));
+}
+function base64ToArrayBuffer(b64) {
+    return Uint8Array.from(atob(b64), c => c.charCodeAt(0)).buffer;
+}
+
+// Derive AES key for encrypting private key in sessionStorage
+async function deriveSessionKey(username, password, saltB64) {
+    const salt = base64ToArrayBuffer(saltB64);
+    const material = await crypto.subtle.importKey(
+        "raw",
+        new TextEncoder().encode(username.toLowerCase() + password),
+        "PBKDF2",
+        false,
+        ["deriveKey"]
+    );
+    return crypto.subtle.deriveKey(
+        {
+            name: "PBKDF2",
+            salt,
+            iterations: 150000,
+            hash: "SHA-256"
+        },
+        material,
+        { name: "AES-GCM", length: 256 },
+        false,
+        ["encrypt", "decrypt"]
+    );
+}
+
+// Encrypt private key for session restore
+async function encryptPrivateKeyForSession(privateKey, username, password) {
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const saltB64 = arrayBufferToBase64(salt.buffer);
+    const key = await deriveSessionKey(username, password, saltB64);
+
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ciphertext = await crypto.subtle.encrypt(
+        { name: "AES-GCM", iv },
+        key,
+        new TextEncoder().encode(privateKey)
+    );
+
+    const combined = new Uint8Array(iv.length + ciphertext.byteLength);
+    combined.set(iv, 0);
+    combined.set(new Uint8Array(ciphertext), iv.length);
+
+    return {
+        encrypted: arrayBufferToBase64(combined.buffer),
+        salt: saltB64
+    };
+}
+
+// Decrypt private key from sessionStorage
+async function decryptPrivateKeyFromSession(username, password, encryptedB64, saltB64) {
+    const combined = new Uint8Array(base64ToArrayBuffer(encryptedB64));
+    const iv = combined.slice(0, 12);
+    const ciphertext = combined.slice(12);
+
+    const key = await deriveSessionKey(username, password, saltB64);
+
+    const decrypted = await crypto.subtle.decrypt(
+        { name: "AES-GCM", iv },
+        key,
+        ciphertext
+    );
+
+    return new TextDecoder().decode(decrypted);
+}
+
 
 // ==================== UTILITY FUNCTIONS ====================
 function getInitials(name) {
@@ -245,22 +327,22 @@ function openOTPVerification(username) {
 
 
 async function handleLogin() {
-    const username = document.getElementById('loginUsername').value.trim();
-    const password = document.getElementById('loginPassword').value;
+    const username = document.getElementById("loginUsername").value.trim();
+    const password = document.getElementById("loginPassword").value;
 
     if (!username || !password) {
-        showStatus('authStatus', 'Please enter username and password', true);
+        showStatus("authStatus", "Please enter username and password", true);
         return;
     }
 
     try {
-        showStatus('authStatus', 'Authenticating...', false);
+        showStatus("authStatus", "Authenticating...", false);
 
         const authHash = await CryptoManager.deriveAuthHash(username, password);
 
-        const response = await fetch('/api/login', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+        const response = await fetch("/api/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 username: username,
                 auth_hash: authHash
@@ -279,6 +361,13 @@ async function handleLogin() {
 
                 const storageKey = await CryptoManager.deriveStorageKey(username, password);
                 const privateKey = await CryptoManager.decryptVault(data.encrypted_vault, storageKey);
+                // --- ADDED: encrypt private key for session restore ---
+                const encrypted = await encryptPrivateKeyForSession(privateKey, username, password);
+                sessionStorage.setItem("encryptedPrivateKey", encrypted.encrypted);
+                sessionStorage.setItem("privateKeySalt", encrypted.salt);
+                sessionStorage.setItem("currentUser", username);
+                sessionStorage.setItem("sessionToken", data.session_token);
+
 
                 currentUser = username;
                 userKeys.publicKey = data.public_key;
@@ -321,9 +410,91 @@ async function handleLogin() {
             showStatus('authStatus', data.detail || 'Login failed', true);
         }
     } catch (error) {
-        showStatus('authStatus', 'Error: ' + error.message, true);
+        showStatus("authStatus", "Error: " + error.message, true);
     }
 }
+
+// ==================== SESSION RESTORE (ADDED) ====================
+async function restoreSessionFromServer(username, token, password) {
+    try {
+        const response = await fetch("/api/session/restore", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ username, session_token: token })
+        });
+
+        const data = await response.json();
+        if (!response.ok || data.status !== "success") {
+            console.warn("Session restore failed:", data.detail || data.message);
+            sessionStorage.clear();
+            return;
+        }
+
+        // Decrypt private key from sessionStorage
+        const encrypted = sessionStorage.getItem("encryptedPrivateKey");
+        const salt = sessionStorage.getItem("privateKeySalt");
+        const privateKey = await decryptPrivateKeyFromSession(username, password, encrypted, salt);
+
+        // Restore global state
+        currentUser = username;
+        sessionToken = token;
+        userKeys.publicKey = data.public_key;
+        userKeys.privateKey = privateKey;
+
+        unreadCounts = data.unread_counts || {};
+        blockedUsers = data.blocked_users || [];
+        mutedUsers = data.muted_users || [];
+
+        // Restore pending messages
+        pendingMessagesStore = {};
+        if (data.pending_messages) {
+            for (const msg of data.pending_messages) {
+                if (!pendingMessagesStore[msg.from]) pendingMessagesStore[msg.from] = [];
+                pendingMessagesStore[msg.from].push(msg);
+            }
+        }
+
+        // Switch UI
+        document.getElementById("authScreen").style.display = "none";
+        document.getElementById("chatContainer").style.display = "block";
+        document.getElementById("userListPage").style.display = "flex";
+
+        connectWebSocket();
+        await loadContacts();
+
+    } catch (err) {
+        console.error("Error restoring session:", err);
+        sessionStorage.clear();
+    }
+}
+
+// ==================== SESSION RESTORE PASSWORD MODAL ====================
+
+function openRestoreSessionModal(username, token) {
+    document.getElementById('authScreen').style.display = 'none';
+    const restoreSession = document.getElementById('restoreSessionModal');
+    restoreSession.style.display = 'flex';
+
+    document.getElementById("restoreSessionSubmitBtn").onclick = () => {
+        const password = document.getElementById("restoreSessionPasswordInput").value.trim();
+        if (!password) {
+            showStatus("restoreSessionStatus", "Password required", true);
+            return;
+        }
+        restoreSession.style.display = 'none';
+        document.getElementById("restoreSessionPasswordInput").value = "";
+        clearStatus("restoreSessionStatus");
+
+        restoreSessionFromServer(username, token, password);
+    };
+
+    document.getElementById("restoreSessionCancelBtn").onclick = () => {
+        restoreSession.style.display = 'none';
+        sessionStorage.clear();
+        location.reload();
+    };
+}
+
 
 function handleLogout() {
     if (websocket) {
@@ -1466,4 +1637,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
     setVH();
     window.addEventListener('resize', setVH);
+
+    // --- ADDED: auto session restore ---
+    const storedUser = sessionStorage.getItem("currentUser");
+    const storedToken = sessionStorage.getItem("sessionToken");
+    const storedEncryptedKey = sessionStorage.getItem("encryptedPrivateKey");
+    const storedSalt = sessionStorage.getItem("privateKeySalt");
+
+    if (storedUser && storedToken && storedEncryptedKey && storedSalt) {
+        openRestoreSessionModal(storedUser, storedToken);
+    }
+
+
 });
