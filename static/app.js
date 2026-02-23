@@ -662,6 +662,8 @@ function connectWebSocket() {
             markMessagesAsRead(data.from);
         } else if (data.type === 'typing') {
             showTypingIndicator(data.from);
+        } else if (data.type === 'reaction_toggle') {
+            applyReactionToggle(data);
         }
     };
 
@@ -790,6 +792,22 @@ function insertEmoji(emoji) {
     const pos = start + emoji.length;
     input.setSelectionRange(pos, pos);
 }
+
+function addLongPressListener(el, callback) {
+    let timer = null;
+
+    el.addEventListener('touchstart', () => {
+        timer = setTimeout(() => {
+            if (navigator.vibrate) navigator.vibrate(10);  // 🔥 HAPTIC FEEDBACK HERE
+            callback();
+        }, 350); // long‑press threshold
+    });
+
+    el.addEventListener('touchend', () => clearTimeout(timer));
+    el.addEventListener('touchmove', () => clearTimeout(timer));
+}
+
+
 
 
 
@@ -993,26 +1011,8 @@ function backToUserList() {
     hideTypingIndicator();
 }
 
-// function createMessageElement(msg) {
-//     const messageDiv = document.createElement('div');
-//     messageDiv.className = `message ${msg.type}`;
-//     messageDiv.dataset.messageId = msg.messageId;
-//
-//     const statusIcon = getStatusIcon(msg.status);
-//
-//     messageDiv.innerHTML = `
-//         <div class="message-bubble">
-//             <div class="message-text ${msg.text.includes('...') ? 'encrypted' : ''}">${msg.text}</div>
-//             <div class="message-footer">
-//                 <span>${formatTime(msg.timestamp)}</span>
-//                 ${msg.type === 'sent' ? `<span class="message-status">${statusIcon}</span>` : ''}
-//             </div>
-//         </div>
-//     `;
-//
-//     return messageDiv;
-// }
 
+/*
 function createMessageElement(msg) {
     const messageDiv = document.createElement('div');
     messageDiv.className = `message ${msg.type}`;
@@ -1038,12 +1038,82 @@ function createMessageElement(msg) {
     `;
 
     // Click to open quick reaction bar for messages from others
+    // if (msg.type === 'received') {
+    //     messageDiv.addEventListener('click', () => openReactionPicker(messageDiv));
+    // }
     if (msg.type === 'received') {
-        messageDiv.addEventListener('click', () => openReactionPicker(messageDiv));
+        addLongPressListener(messageDiv, () => openReactionPicker(messageDiv));
+
+        // Desktop fallback
+        messageDiv.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            openReactionPicker(messageDiv);
+        });
+    }
+
+
+    return messageDiv;
+}
+*/
+function createMessageElement(msg) {
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `message ${msg.type}`;
+    messageDiv.dataset.messageId = msg.messageId;
+
+    const statusIcon = getStatusIcon(msg.status);
+
+    // --- UPDATED: group reactions by emoji + count ---
+    let reactionsHtml = '';
+    if (msg.reactions && msg.reactions.length > 0) {
+        const counts = {};
+        msg.reactions.forEach(r => {
+            counts[r.emoji] = (counts[r.emoji] || 0) + 1;
+        });
+
+        const grouped = Object.entries(counts)
+            .map(([emoji, count]) =>
+                `<span class="reaction-emoji">${emoji}${count > 1 ? ' ' + count : ''}</span>`
+            )
+            .join('');
+
+        reactionsHtml = `
+            <div class="message-reactions">
+                ${grouped}
+            </div>
+        `;
+    }
+
+    // --- ORIGINAL STRUCTURE PRESERVED ---
+    messageDiv.innerHTML = `
+    <div class="message-bubble"> 
+        <div class="message-text ${msg.text.includes('...') ? 'encrypted' : ''}">
+            ${msg.text}
+        </div>
+        ${reactionsHtml}
+        <div class="message-footer">
+            <span>${formatTime(msg.timestamp)}</span>
+            ${msg.type === 'sent' ? `<span class="message-status">${statusIcon}</span>` : ''}
+        </div>
+    </div>
+    `;
+
+    // --- UPDATED: long‑press + right‑click reaction picker ---
+    if (msg.type === 'received') {
+        // Mobile long‑press
+        addLongPressListener(messageDiv, () => openReactionPicker(messageDiv));
+
+        // Desktop right‑click
+        messageDiv.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            if (navigator.vibrate) navigator.vibrate(5); // subtle
+            openReactionPicker(messageDiv);
+        });
+
     }
 
     return messageDiv;
 }
+
 
 // ============= Message Reactions =============
 const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🔥'];
@@ -1062,7 +1132,10 @@ function openReactionPicker(messageEl) {
     picker.addEventListener('click', (e) => {
         if (e.target.tagName === 'SPAN') {
             const emoji = e.target.textContent;
-            sendReaction(messageEl.dataset.messageId, emoji);
+            sendReactionToggle(messageEl.dataset.messageId, emoji);
+            // Close picker after selection
+            picker.remove();
+            currentReactionPicker = null;
         }
     });
 
@@ -1096,6 +1169,57 @@ function sendReaction(messageId, emoji) {
     }));
 }
 
+function renderReactions(msg, bubble) {
+    const counts = {};
+
+    msg.reactions.forEach(r => {
+        counts[r.emoji] = (counts[r.emoji] || 0) + 1;
+    });
+
+    const reactionsDiv = document.createElement('div');
+    reactionsDiv.className = 'message-reactions';
+
+    Object.entries(counts).forEach(([emoji, count]) => {
+        const span = document.createElement('span');
+        span.className = 'reaction-emoji';
+        span.textContent = count > 1 ? `${emoji} ${count}` : emoji;
+        reactionsDiv.appendChild(span);
+    });
+
+    bubble.insertBefore(reactionsDiv, bubble.querySelector('.message-footer'));
+}
+
+function sendReactionToggle(messageId, emoji) {
+    websocket.send(JSON.stringify({
+        type: "reaction_toggle",
+        from: currentUser,
+        to: currentRecipient,
+        message_id: Number(messageId),
+        emoji
+    }));
+}
+
+
+function applyReactionToggle(data) {
+    const { message_id, emoji, from, status } = data;
+
+    const chat = chatHistory[currentRecipient] || [];
+    const msg = chat.find(m => m.messageId === message_id);
+    if (!msg) return;
+
+    if (status === "added") {
+        msg.reactions.push({ username: from, emoji });
+    } else {
+        msg.reactions = msg.reactions.filter(r => !(r.username === from && r.emoji === emoji));
+    }
+
+    // Re-render the reaction bar
+    const el = document.querySelector(`[data-message-id="${message_id}"]`);
+    const bubble = el.querySelector('.message-bubble');
+    const old = bubble.querySelector('.message-reactions');
+    if (old) old.remove();
+    if (msg.reactions.length) renderReactions(msg, bubble);
+}
 
 
 function getStatusIcon(status) {

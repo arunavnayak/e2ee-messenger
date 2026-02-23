@@ -1052,6 +1052,54 @@ async def websocket_endpoint(websocket: WebSocket, username: str):
                 await manager.send_personal_message(payload, to_user)
                 await manager.send_personal_message(payload, from_user)
 
+            elif data.get("type") == "reaction_toggle":
+                msg_id = data.get("message_id")
+                emoji = data.get("emoji")
+                from_user = data.get("from")
+                to_user = data.get("to")
+
+                # Verify sender matches authenticated user
+                if from_user != username:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "Sender mismatch"
+                    })
+                    continue
+
+                # Check if reaction already exists
+                existing = db.query(MessageReaction).filter(
+                    MessageReaction.message_id == msg_id,
+                    MessageReaction.username == from_user,
+                    MessageReaction.emoji == emoji
+                ).first()
+
+                if existing:
+                    db.delete(existing)
+                    db.commit()
+                    status = "removed"
+                else:
+                    new_reaction = MessageReaction(
+                        message_id=msg_id,
+                        username=from_user,
+                        emoji=emoji
+                    )
+                    db.add(new_reaction)
+                    db.commit()
+                    status = "added"
+
+                # Notify both users
+                payload = {
+                    "type": "reaction_toggle",
+                    "message_id": msg_id,
+                    "emoji": emoji,
+                    "from": from_user,
+                    "status": status
+                }
+
+                await manager.send_personal_message(payload, to_user)
+                await manager.send_personal_message(payload, from_user)
+
+
     except WebSocketDisconnect:
         manager.disconnect(username)
         db.close()
@@ -1061,6 +1109,35 @@ async def websocket_endpoint(websocket: WebSocket, username: str):
         traceback.print_exc()
         manager.disconnect(username)
         db.close()
+
+class ToggleReactionRequest(BaseModel):
+    message_id: int          # or str, if you're using a string ID on the client and mapping it server-side
+    emoji: str               # the emoji being toggled (e.g. "❤️", "😂")
+    from_username: str       # the user performing the reaction
+    to_username: str         # the message owner / recipient
+
+
+@app.post("/api/reaction/toggle")
+async def toggle_reaction(req: ToggleReactionRequest, db: Session = Depends(get_db)):
+    existing = db.query(MessageReaction).filter(
+        MessageReaction.message_id == req.message_id,
+        MessageReaction.username == req.username,
+        MessageReaction.emoji == req.emoji
+    ).first()
+
+    if existing:
+        db.delete(existing)
+        db.commit()
+        return {"status": "removed"}
+
+    new = MessageReaction(
+        message_id=req.message_id,
+        username=req.username,
+        emoji=req.emoji
+    )
+    db.add(new)
+    db.commit()
+    return {"status": "added"}
 
 
 # ==================== STATIC FILES ====================
