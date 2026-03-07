@@ -199,7 +199,7 @@ class CSPMiddleware(BaseHTTPMiddleware):
             "style-src 'self' 'unsafe-inline'",
             "worker-src 'self' blob:",
             "connect-src 'self' wss://*.onrender.com ws://localhost:8000 wss://localhost:8000",
-            "img-src 'self' data:",
+            "img-src 'self' data: blob:",
             "font-src 'self'",
             "object-src 'none'",
             "base-uri 'self'",

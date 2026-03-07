@@ -26,11 +26,22 @@ let typingTimeout = null;
 // ==================== SESSION RESTORE CRYPTO HELPERS (ADDED) ====================
 
 // Convert base64 <-> ArrayBuffer
+// IMPORTANT: Do NOT use spread operator (String.fromCharCode(...bytes)) — it blows the
+// call stack for large files (e.g. PDFs).  Use a chunked loop instead.
 function arrayBufferToBase64(buf) {
-    return btoa(String.fromCharCode(...new Uint8Array(buf)));
+    const bytes = new Uint8Array(buf);
+    const CHUNK = 8192;
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+    }
+    return btoa(binary);
 }
 function base64ToArrayBuffer(b64) {
-    return Uint8Array.from(atob(b64), c => c.charCodeAt(0)).buffer;
+    const binary = atob(b64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes.buffer;
 }
 
 // Derive AES key for encrypting private key in sessionStorage
@@ -1067,17 +1078,18 @@ async function openChat(username) {
                 timestamp: msg.timestamp,
                 messageId: msg.messageId,
                 status: msg.status,
-                decryptedBlobUrl: null,
+                blobUrl: null,
             });
             messagesArea.appendChild(el);
 
-            // Async decrypt and update
-            if (!isSent) {
-                (async () => {
-                    const blobUrl = await handleIncomingAttachment(payload, { from: username });
-                    if (blobUrl) updateAttachmentInUI(msg.messageId, filename, mimeType, isImage, blobUrl);
-                })();
-            }
+            // Decrypt for both sender and receiver.
+            // ECDH shared key is symmetric — the same secret is produced whether
+            // you call ECDH(mySenderPrivKey, recipientPubKey) or
+            // ECDH(myReceiverPrivKey, senderPubKey).
+            (async () => {
+                const blobUrl = await handleIncomingAttachment(payload, { from: username, isSent });
+                if (blobUrl) updateAttachmentInUI(msg.messageId, filename, mimeType, isImage, blobUrl);
+            })();
         } else {
             const messageEl = createMessageElement(msg);
             messagesArea.appendChild(messageEl);
@@ -1517,26 +1529,169 @@ function updateAttachmentInUI(messageId, filename, mimeType, isImage, blobUrl) {
     if (!el || el.dataset.attachmentType !== 'attachment') return;
     const bubble = el.querySelector('.message-bubble');
     if (!bubble) return;
+    const isSent = el.classList.contains('sent');
 
-    // Replace placeholder content (everything except the footer)
-    const footer = bubble.querySelector('.message-footer');
-    // Remove old content nodes
-    Array.from(bubble.childNodes).forEach(n => { if (n !== footer) n.remove(); });
+    // Grab the existing time/tick footer so we can move it inside the new card
+    const existingFooter = bubble.querySelector('.attach-footer');
 
-    let newContent;
+    const displayName = filename.length > 28 ? filename.slice(0, 24) + '…' + filename.slice(filename.lastIndexOf('.')) : filename;
+    const iconSvg = getAttachmentIcon(mimeType, isImage);
+
+    // Clear bubble, then rebuild
+    bubble.innerHTML = '';
+
+    let newCard;
     if (isImage) {
-        newContent = document.createElement('img');
-        newContent.src = blobUrl;
-        newContent.className = 'attachment-image-preview';
-        newContent.alt = filename;
-        newContent.onclick = () => window.open(blobUrl, '_blank');
+        newCard = document.createElement('div');
+        newCard.className = `attach-card attach-card-image ${isSent ? 'sent' : 'received'}`;
+        newCard.dataset.msgid = messageId;
+        const img = document.createElement('img');
+        img.className = 'attach-thumb';
+        img.src = blobUrl;
+        img.alt = displayName;
+        const cardFoot = document.createElement('div');
+        cardFoot.className = 'attach-card-footer';
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'attach-name';
+        nameSpan.textContent = displayName;
+        cardFoot.appendChild(nameSpan);
+        newCard.appendChild(img);
+        newCard.appendChild(cardFoot);
+        newCard.addEventListener('click', () => openImageLightbox(blobUrl, filename));
     } else {
-        newContent = document.createElement('div');
-        newContent.className = 'attachment-file-badge';
-        newContent.innerHTML = `📎 <a href="${blobUrl}" download="${filename}">${filename}</a>`;
+        newCard = document.createElement('div');
+        newCard.className = `attach-card attach-card-file ${isSent ? 'sent' : 'received'}`;
+        newCard.dataset.msgid = messageId;
+        newCard._blobUrl = blobUrl;
+        newCard._filename = filename;
+
+        const body = document.createElement('div');
+        body.className = 'attach-card-body';
+
+        const iconWrap = document.createElement('div');
+        iconWrap.className = 'attach-icon-wrap';
+        iconWrap.innerHTML = iconSvg;
+
+        const meta = document.createElement('div');
+        meta.className = 'attach-meta';
+
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'attach-name';
+        nameSpan.textContent = displayName;
+
+        const dlBtn = document.createElement('button');
+        dlBtn.className = 'attach-download-btn';
+        dlBtn.textContent = '⬇ Download';
+        dlBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            doDownload(blobUrl, filename);
+        });
+
+        meta.appendChild(nameSpan);
+        meta.appendChild(dlBtn);
+        body.appendChild(iconWrap);
+        body.appendChild(meta);
+        newCard.appendChild(body);
     }
-    bubble.insertBefore(newContent, footer);
+    // Re-append the time/tick footer INSIDE the new card
+    if (existingFooter) newCard.appendChild(existingFooter);
+    bubble.appendChild(newCard);
 }
+
+/** Per-type SVG icons for attachment cards */
+function getAttachmentIcon(mimeType, isImage) {
+    if (isImage) {
+        return `<svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="4" y="8" width="40" height="32" rx="4" fill="#667eea" opacity="0.18"/>
+            <rect x="4" y="8" width="40" height="32" rx="4" stroke="#667eea" stroke-width="2.5" fill="none"/>
+            <circle cx="16" cy="19" r="4" fill="#667eea"/>
+            <path d="M4 34l10-10 8 8 6-6 16 14" stroke="#667eea" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        </svg>`;
+    }
+    if (mimeType === 'application/pdf') {
+        return `<svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="6" y="2" width="28" height="40" rx="3" fill="#fee2e2"/>
+            <rect x="6" y="2" width="28" height="40" rx="3" stroke="#ef4444" stroke-width="2" fill="none"/>
+            <path d="M28 2v10h10" stroke="#ef4444" stroke-width="2" stroke-linejoin="round" fill="none"/>
+            <path d="M28 2l10 10H28V2z" fill="#fca5a5"/>
+            <text x="9" y="35" font-family="Arial,sans-serif" font-weight="800" font-size="9" fill="#ef4444">PDF</text>
+        </svg>`;
+    }
+    if (mimeType === 'text/plain') {
+        return `<svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="6" y="2" width="28" height="40" rx="3" fill="#dcfce7"/>
+            <rect x="6" y="2" width="28" height="40" rx="3" stroke="#22c55e" stroke-width="2" fill="none"/>
+            <path d="M28 2v10h10" stroke="#22c55e" stroke-width="2" stroke-linejoin="round" fill="none"/>
+            <path d="M28 2l10 10H28V2z" fill="#86efac"/>
+            <text x="9" y="35" font-family="Arial,sans-serif" font-weight="800" font-size="9" fill="#22c55e">TXT</text>
+        </svg>`;
+    }
+    // DOC / DOCX
+    return `<svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="6" y="2" width="28" height="40" rx="3" fill="#dbeafe"/>
+        <rect x="6" y="2" width="28" height="40" rx="3" stroke="#2563eb" stroke-width="2" fill="none"/>
+        <path d="M28 2v10h10" stroke="#2563eb" stroke-width="2" stroke-linejoin="round" fill="none"/>
+        <path d="M28 2l10 10H28V2z" fill="#93c5fd"/>
+        <text x="6" y="35" font-family="Arial,sans-serif" font-weight="800" font-size="9" fill="#2563eb">DOC</text>
+    </svg>`;
+}
+
+/** CSP-safe download — called only via addEventListener, never from inline onclick */
+function doDownload(blobUrl, filename) {
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = filename;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+}
+
+/** Legacy entry point kept for any remaining callers — delegates to doDownload */
+function triggerAttachmentDownload(messageId) {
+    const el = document.querySelector(`[data-message-id="${messageId}"]`);
+    if (!el) return;
+    const card = el.querySelector('.attach-card-file');
+    if (!card) return;
+    // Try JS property first (set by updateAttachmentInUI), fall back to dataset
+    const blobUrl = card._blobUrl || card.dataset.bloburl;
+    const filename = card._filename || card.dataset.filename;
+    if (blobUrl && filename) doDownload(blobUrl, filename);
+}
+
+// ==================== IMAGE LIGHTBOX (in-app, no new tab, no exposed URL) ====================
+let _lightboxBlobUrl = null;
+
+function openImageLightbox(blobUrl, filename) {
+    _lightboxBlobUrl = blobUrl;
+    const lb = document.getElementById('imageLightbox');
+    const img = document.getElementById('lightboxImg');
+    img.src = blobUrl;
+    img.alt = filename;
+    document.getElementById('lightboxFilename').textContent = filename;
+    lb.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+}
+
+function closeImageLightbox() {
+    document.getElementById('imageLightbox').style.display = 'none';
+    document.getElementById('lightboxImg').src = '';
+    document.body.style.overflow = '';
+}
+
+function downloadLightboxImage() {
+    if (!_lightboxBlobUrl) return;
+    const filename = document.getElementById('lightboxFilename').textContent || 'image';
+    const a = document.createElement('a');
+    a.href = _lightboxBlobUrl;
+    a.download = filename;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+}
+
+
 
 function updateHistoryMessage(username, timestamp, newText) {
     if (!chatHistory[username]) return;
@@ -1929,10 +2084,15 @@ async function handleFileSelected(file) {
         const encryptedB64 = arrayBufferToBase64(ciphertext);
         const nonceB64 = arrayBufferToBase64(iv.buffer);
 
-        // Show a sending indicator in the chat
+        // Create a local blob URL from the ORIGINAL (unencrypted) file bytes
+        // so the sender immediately sees the correct image/file card — no "Decrypting…"
+        const localBlob = new Blob([fileBytes], {type: mime});
+        const localBlobUrl = URL.createObjectURL(localBlob);
+
+        // Show the card with the blob URL already resolved
         const tempId = crypto.randomUUID();
         const ts = Date.now();
-        addAttachmentMessageToUI(file.name, mime, isImage, 'sent', ts, tempId, 'sent', null);
+        addAttachmentMessageToUI(file.name, mime, isImage, 'sent', ts, tempId, 'sent', localBlobUrl);
 
         // Upload to server
         const res = await fetch('/api/attachment/upload', {
@@ -2014,7 +2174,7 @@ async function handleSaveAdminSettings() {
 }
 
 // ==================== ATTACHMENT MESSAGE UI ====================
-function addAttachmentMessageToUI(filename, mimeType, isImage, type, timestamp, messageId, status, decryptedBlobUrl) {
+function addAttachmentMessageToUI(filename, mimeType, isImage, type, timestamp, messageId, status, blobUrl) {
     const messagesArea = document.getElementById('messagesArea');
     const msgDate = formatDate(timestamp);
 
@@ -2027,52 +2187,163 @@ function addAttachmentMessageToUI(filename, mimeType, isImage, type, timestamp, 
         messagesArea.appendChild(dateDivider);
     }
 
-    const el = createAttachmentElement({filename, mimeType, isImage, type, timestamp, messageId, status, decryptedBlobUrl});
+    const el = createAttachmentElement({filename, mimeType, isImage, type, timestamp, messageId, status, blobUrl});
     messagesArea.appendChild(el);
     messagesArea.scrollTop = messagesArea.scrollHeight;
 }
 
-function createAttachmentElement({filename, mimeType, isImage, type, timestamp, messageId, status, decryptedBlobUrl}) {
+function createAttachmentElement({filename, mimeType, isImage, type, timestamp, messageId, status, blobUrl}) {
     const messageDiv = document.createElement('div');
     messageDiv.className = `message ${type}`;
     messageDiv.dataset.messageId = messageId;
     messageDiv.dataset.attachmentType = 'attachment';
+    messageDiv.dataset.isImage = isImage ? '1' : '0';
+    messageDiv.dataset.filename = filename;
+    messageDiv.dataset.mimeType = mimeType;
 
-    const statusIcon = getStatusIcon(status);
-    let contentHtml = '';
+    const isSent = type === 'sent';
+    const displayName = filename.length > 28
+        ? filename.slice(0, 24) + '…' + filename.slice(filename.lastIndexOf('.'))
+        : filename;
+    const iconSvg = getAttachmentIcon(mimeType, isImage);
 
-    if (isImage && decryptedBlobUrl) {
-        contentHtml = `<img src="${decryptedBlobUrl}" class="attachment-image-preview" alt="${filename}" 
-            onclick="window.open('${decryptedBlobUrl}', '_blank')">`;
-    } else if (isImage) {
-        contentHtml = `<div class="attachment-file-badge">🖼️ ${filename} <span class="attachment-loading">(loading…)</span></div>`;
-    } else if (decryptedBlobUrl) {
-        contentHtml = `<div class="attachment-file-badge">📎 <a href="${decryptedBlobUrl}" download="${filename}">${filename}</a></div>`;
+    // Build card using DOM methods only — no innerHTML with onclick (CSP-safe)
+    let card;
+
+    if (isImage && blobUrl) {
+        card = document.createElement('div');
+        card.className = `attach-card attach-card-image ${isSent ? 'sent' : 'received'}`;
+        card.dataset.msgid = messageId;
+
+        const img = document.createElement('img');
+        img.className = 'attach-thumb';
+        img.src = blobUrl;
+        img.alt = displayName;
+
+        const cardFoot = document.createElement('div');
+        cardFoot.className = 'attach-card-footer';
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'attach-name';
+        nameSpan.textContent = displayName;
+        cardFoot.appendChild(nameSpan);
+
+        card.appendChild(img);
+        card.appendChild(cardFoot);
+        // addEventListener — CSP-safe, no inline onclick
+        card.addEventListener('click', () => openImageLightbox(blobUrl, filename));
+
+    } else if (!isImage && blobUrl) {
+        card = document.createElement('div');
+        card.className = `attach-card attach-card-file ${isSent ? 'sent' : 'received'}`;
+        card.dataset.msgid = messageId;
+        card._blobUrl = blobUrl;
+        card._filename = filename;
+
+        const body = document.createElement('div');
+        body.className = 'attach-card-body';
+
+        const iconWrap = document.createElement('div');
+        iconWrap.className = 'attach-icon-wrap';
+        iconWrap.innerHTML = iconSvg;
+
+        const meta = document.createElement('div');
+        meta.className = 'attach-meta';
+
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'attach-name';
+        nameSpan.textContent = displayName;
+
+        const dlBtn = document.createElement('button');
+        dlBtn.className = 'attach-download-btn';
+        dlBtn.textContent = '⬇ Download';
+        dlBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            doDownload(blobUrl, filename);
+        });
+
+        meta.appendChild(nameSpan);
+        meta.appendChild(dlBtn);
+        body.appendChild(iconWrap);
+        body.appendChild(meta);
+        card.appendChild(body);
+
     } else {
-        contentHtml = `<div class="attachment-file-badge">📎 ${filename} <span class="attachment-loading">(loading…)</span></div>`;
+        // Loading placeholder — blobUrl not ready yet
+        card = document.createElement('div');
+        card.className = `attach-card attach-card-file ${isSent ? 'sent' : 'received'}`;
+
+        const body = document.createElement('div');
+        body.className = 'attach-card-body';
+
+        const iconWrap = document.createElement('div');
+        iconWrap.className = 'attach-icon-wrap';
+        iconWrap.innerHTML = iconSvg;
+
+        const meta = document.createElement('div');
+        meta.className = 'attach-meta';
+
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'attach-name';
+        nameSpan.textContent = displayName;
+
+        const statusTxt = document.createElement('span');
+        statusTxt.className = 'attach-status-text';
+        statusTxt.textContent = 'Decrypting…';
+
+        meta.appendChild(nameSpan);
+        meta.appendChild(statusTxt);
+        body.appendChild(iconWrap);
+        body.appendChild(meta);
+        card.appendChild(body);
     }
 
-    messageDiv.innerHTML = `
-    <div class="message-bubble">
-        ${contentHtml}
-        <div class="message-footer">
-            <span>${formatTime(timestamp)}</span>
-            ${type === 'sent' ? `<span class="message-status">${statusIcon}</span>` : ''}
-        </div>
-    </div>`;
+    // Footer goes INSIDE the card — renders within the card's border/background
+    const footer = document.createElement('div');
+    footer.className = 'message-footer attach-footer';
+    const timeSpan = document.createElement('span');
+    timeSpan.textContent = formatTime(timestamp);
+    footer.appendChild(timeSpan);
+    if (isSent) {
+        const statusSpan = document.createElement('span');
+        statusSpan.className = 'message-status';
+        statusSpan.innerHTML = getStatusIcon(status);
+        footer.appendChild(statusSpan);
+    }
+    card.appendChild(footer);
 
+    // Bubble is a transparent wrapper only
+    const bubble = document.createElement('div');
+    bubble.className = 'message-bubble attach-bubble';
+    bubble.appendChild(card);
+    messageDiv.appendChild(bubble);
     return messageDiv;
 }
 
-// Handle attachment payload in incoming messages
+// Handle attachment payload in incoming messages.
+// data.isSent = true  → I am the original sender viewing my own history
+//               false/undefined → I am the receiver
+//
+// ECDH shared secret = ECDH(myPrivateKey, otherPartyPublicKey)
+// • As receiver : otherParty = sender   → use payload.sender_public_key
+// • As sender   : otherParty = recipient → use recipient's public key from contacts
 async function handleIncomingAttachment(payload, data) {
-    const senderPublicKey = payload.sender_public_key;
-    const isImage = payload.category === 'image';
-
     try {
-        // Decrypt the file bytes
+        let otherPartyPublicKeyB64;
+        if (data.isSent) {
+            // I sent this — derive key with the recipient's public key
+            const recipientContact = contacts.find(c => c.username === currentRecipient);
+            if (!recipientContact) {
+                console.error('Attachment decrypt: recipient contact not found');
+                return null;
+            }
+            otherPartyPublicKeyB64 = recipientContact.public_key;
+        } else {
+            // I received this — derive key with the sender's public key (stored in payload)
+            otherPartyPublicKeyB64 = payload.sender_public_key;
+        }
+
         const pub = await crypto.subtle.importKey(
-            'raw', base64ToArrayBuffer(senderPublicKey),
+            'raw', base64ToArrayBuffer(otherPartyPublicKeyB64),
             {name: 'ECDH', namedCurve: 'P-256'}, false, []
         );
         const priv = await crypto.subtle.importKey(
@@ -2089,9 +2360,7 @@ async function handleIncomingAttachment(payload, data) {
         const decrypted = await crypto.subtle.decrypt({name: 'AES-GCM', iv}, sharedKey, ct);
 
         const blob = new Blob([decrypted], {type: payload.mime_type});
-        const blobUrl = URL.createObjectURL(blob);
-
-        return blobUrl;
+        return URL.createObjectURL(blob);
     } catch (e) {
         console.error('Attachment decryption failed:', e);
         return null;
@@ -2226,6 +2495,13 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('adminSettingsModal').addEventListener('click', (e) => {
         if (e.target.id === 'adminSettingsModal') hideAdminSettingsModal();
     });
+
+    // ===== IMAGE LIGHTBOX — backdrop click + Save/Close buttons =====
+    document.getElementById('imageLightbox').addEventListener('click', (e) => {
+        if (e.target.id === 'imageLightbox') closeImageLightbox();
+    });
+    document.getElementById('lightboxSaveBtn').addEventListener('click', downloadLightboxImage);
+    document.getElementById('lightboxCloseBtn').addEventListener('click', closeImageLightbox);
 
     // ===== MOBILE VIEWPORT HEIGHT =====
     function setVH() {
