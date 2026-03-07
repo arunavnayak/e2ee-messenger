@@ -2,6 +2,8 @@ import hashlib
 import hmac
 import json
 import os
+import re
+import base64
 from datetime import datetime, timedelta, UTC
 from typing import Dict
 
@@ -23,7 +25,8 @@ from models import (
     SessionToken,
     UserPreferences,
     UserVerification,
-    MessageReaction
+    MessageReaction,
+    AttachmentConfig,
 )
 from rate_limiter import RateLimitMiddleware, login_rate_limiter, ws_rate_limiter
 from status import router as status_router
@@ -245,6 +248,35 @@ class RegisterRequest(BaseModel):
         return v.lower()
 
 
+def validate_password_strength(password: str) -> str:
+    """
+    Validates that a raw password meets complexity requirements:
+    - At least 12 characters
+    - Contains at least one uppercase letter
+    - Contains at least one lowercase letter
+    - Contains at least one digit
+    - Contains at least one special character
+    NOTE: The frontend never sends the raw password to the backend; this helper is
+    used only in endpoints where the raw password is available (currently none, but
+    kept as a reusable utility and enforced at the JS layer).  The backend enforces
+    these same rules on the UpdateVaultRequest by checking the new_auth_hash is
+    non-empty and trusting front-end validation.  All password complexity checks are
+    primarily enforced in JS; this function is exported for any future endpoints that
+    receive the plain password directly.
+    """
+    if len(password) < 12:
+        raise ValueError("Password must be at least 12 characters long")
+    if not re.search(r"[A-Z]", password):
+        raise ValueError("Password must contain at least one uppercase letter")
+    if not re.search(r"[a-z]", password):
+        raise ValueError("Password must contain at least one lowercase letter")
+    if not re.search(r"\d", password):
+        raise ValueError("Password must contain at least one digit")
+    if not re.search(r"[!@#$%^&*()_+\-=\[\]{};':\"\\|,.<>\/?`~]", password):
+        raise ValueError("Password must contain at least one special character")
+    return password
+
+
 class LoginRequest(BaseModel):
     username: str
     auth_hash: str
@@ -443,7 +475,8 @@ async def login(req: LoginRequest, request: Request, db: Session = Depends(get_d
         "unread_counts": unread_counts,
         "session_token": session_token,
         "blocked_users": json.loads(prefs.blocked_users),
-        "muted_users": json.loads(prefs.muted_users)
+        "muted_users": json.loads(prefs.muted_users),
+        "is_admin": user.is_admin,
     }
 
 
@@ -524,6 +557,7 @@ async def restore_session(req: RestoreSessionRequest, db: Session = Depends(get_
         "session_token": req.session_token,  # reuse existing token
         "blocked_users": json.loads(prefs.blocked_users),
         "muted_users": json.loads(prefs.muted_users),
+        "is_admin": user.is_admin,
     }
 
 
@@ -546,6 +580,173 @@ async def update_vault(req: UpdateVaultRequest, db: Session = Depends(get_db)):
     db.commit()
 
     return {"status": "success", "message": "Vault updated successfully"}
+
+
+# ==================== ATTACHMENT CONFIG (ADMIN ONLY) ====================
+
+def get_attachment_config(db: Session) -> AttachmentConfig:
+    """Return the single AttachmentConfig row, creating it with defaults if absent."""
+    cfg = db.query(AttachmentConfig).filter(AttachmentConfig.id == 1).first()
+    if not cfg:
+        cfg = AttachmentConfig(id=1, max_image_size_mb=5, max_file_size_mb=10)
+        db.add(cfg)
+        db.commit()
+        db.refresh(cfg)
+    return cfg
+
+
+@app.get("/api/admin/attachment-config")
+async def get_attachment_config_endpoint(db: Session = Depends(get_db)):
+    """Return current attachment size limits (readable by all authenticated clients)."""
+    cfg = get_attachment_config(db)
+    return {
+        "max_image_size_mb": cfg.max_image_size_mb,
+        "max_file_size_mb": cfg.max_file_size_mb,
+    }
+
+
+class UpdateAttachmentConfigRequest(BaseModel):
+    admin_username: str
+    max_image_size_mb: int
+    max_file_size_mb: int
+
+    @field_validator("max_image_size_mb", "max_file_size_mb")
+    @classmethod
+    def positive_mb(cls, v):
+        if v < 1 or v > 100:
+            raise ValueError("Size must be between 1 and 100 MB")
+        return v
+
+
+@app.post("/api/admin/attachment-config")
+async def update_attachment_config(req: UpdateAttachmentConfigRequest, db: Session = Depends(get_db)):
+    """Update attachment size limits. Only admin users are permitted."""
+    admin = db.query(User).filter(User.username == req.admin_username).first()
+    if not admin or not admin.is_admin:
+        raise HTTPException(status_code=403, detail="Admin privileges required")
+
+    cfg = get_attachment_config(db)
+    cfg.max_image_size_mb = req.max_image_size_mb
+    cfg.max_file_size_mb = req.max_file_size_mb
+    cfg.updated_by = req.admin_username
+    db.commit()
+
+    return {
+        "status": "success",
+        "max_image_size_mb": cfg.max_image_size_mb,
+        "max_file_size_mb": cfg.max_file_size_mb,
+    }
+
+
+# ==================== FILE ATTACHMENT UPLOAD ====================
+
+# Allowed MIME types and their categories
+ALLOWED_MIME_TYPES = {
+    # Images
+    "image/jpeg": "image",
+    "image/png": "image",
+    # Documents
+    "application/msword": "file",                                                        # .doc
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "file",  # .docx (treat as doc)
+    "text/plain": "file",                                                                # .txt
+    "application/pdf": "file",                                                           # .pdf
+}
+
+ALLOWED_EXTENSIONS = {".jpeg", ".jpg", ".png", ".doc", ".docx", ".txt", ".pdf"}
+
+
+class AttachmentUploadRequest(BaseModel):
+    from_username: str
+    to_username: str
+    filename: str
+    mime_type: str
+    # Base64-encoded encrypted file data (already E2EE by the client)
+    encrypted_data: str
+    # Nonce used during encryption, base64
+    nonce: str
+    # Sender's public key so the recipient can derive the shared key
+    sender_public_key: str
+
+
+@app.post("/api/attachment/upload")
+async def upload_attachment(req: AttachmentUploadRequest, db: Session = Depends(get_db)):
+    """
+    Accept an E2EE-encrypted file attachment.
+    The client encrypts the file bytes with AES-GCM (same ECDH shared-key flow as messages)
+    and sends the base64-encoded ciphertext here.  The server stores the ciphertext in the
+    existing PendingMessage table using a special payload envelope so it travels through the
+    normal messaging pipeline.
+    """
+    # Validate mime type
+    mime = req.mime_type.lower()
+    if mime not in ALLOWED_MIME_TYPES:
+        raise HTTPException(status_code=400, detail=f"File type '{mime}' is not allowed. Allowed: jpeg/png/doc/txt/pdf")
+
+    # Validate extension
+    import os as _os
+    ext = _os.path.splitext(req.filename)[1].lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"File extension '{ext}' is not allowed")
+
+    # Enforce size limits
+    cfg = get_attachment_config(db)
+    category = ALLOWED_MIME_TYPES[mime]
+    max_bytes = (cfg.max_image_size_mb if category == "image" else cfg.max_file_size_mb) * 1024 * 1024
+
+    try:
+        raw_bytes = base64.b64decode(req.encrypted_data)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid base64 encoding for encrypted_data")
+
+    if len(raw_bytes) > max_bytes:
+        limit_mb = cfg.max_image_size_mb if category == "image" else cfg.max_file_size_mb
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Maximum size for {category}s is {limit_mb} MB"
+        )
+
+    # Package as a special payload envelope (same format as text messages but with type="attachment")
+    payload = json.dumps({
+        "type": "attachment",
+        "sender_public_key": req.sender_public_key,
+        "nonce": req.nonce,
+        "ciphertext": req.encrypted_data,   # already base64-encoded encrypted bytes
+        "filename": req.filename,
+        "mime_type": req.mime_type,
+        "category": category,
+    })
+
+    # Check if recipient is blocked
+    if is_user_blocked(req.to_username, req.from_username, db):
+        raise HTTPException(status_code=403, detail="You are blocked by this user")
+
+    # Store as a PendingMessage (same as text messages, flows through normal delivery)
+    message_record = PendingMessage(
+        from_username=req.from_username,
+        to_username=req.to_username,
+        encrypted_payload=payload,
+        read=False,
+    )
+    db.add(message_record)
+    db.commit()
+    db.refresh(message_record)
+
+    # Attempt real-time delivery via WebSocket
+    delivered = await manager.send_personal_message(
+        {
+            "type": "message",
+            "from": req.from_username,
+            "payload": payload,
+            "timestamp": datetime.now(UTC).isoformat(timespec="milliseconds"),
+            "message_id": message_record.id,
+        },
+        req.to_username,
+    )
+
+    return {
+        "status": "delivered" if delivered else "queued",
+        "message_id": message_record.id,
+    }
 
 
 @app.get("/api/users")

@@ -15,6 +15,7 @@ class User(Base):
     auth_hash = Column(String(128), nullable=False)  # PBKDF2 hash for authentication
     public_key = Column(Text, nullable=False)  # X25519 public key (base64)
     is_verified = Column(Boolean, default=False)
+    is_admin = Column(Boolean, default=False, nullable=False)  # Admin flag — only admins can manage attachment config
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -82,6 +83,23 @@ class UserVerification(Base):
     otp_code = Column(String(6), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     expires_at = Column(DateTime(timezone=True), nullable=False)
+
+
+class AttachmentConfig(Base):
+    """
+    Admin-controlled configuration for attachment uploads.
+    Only one row is expected (id=1). Only admin users can modify it via the Admin Settings panel.
+    Supported types:
+      - images: jpeg, png
+      - files:  doc, txt, pdf
+    """
+    __tablename__ = "attachment_config"
+
+    id = Column(Integer, primary_key=True, index=True)
+    max_image_size_mb = Column(Integer, default=5, nullable=False)   # Max size (MB) for jpeg/png uploads
+    max_file_size_mb = Column(Integer, default=10, nullable=False)   # Max size (MB) for doc/txt/pdf uploads
+    updated_by = Column(String(32), nullable=True)                   # Admin username who last changed this
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
 
 # models.py

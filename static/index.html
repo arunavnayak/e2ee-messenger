@@ -767,6 +767,33 @@
             color: #333;
         }
 
+        /* ===== ATTACHMENT PREVIEWS ===== */
+        .attachment-image-preview {
+            max-width: 220px;
+            max-height: 220px;
+            border-radius: 8px;
+            cursor: pointer;
+            display: block;
+            margin-bottom: 4px;
+            object-fit: cover;
+        }
+        .attachment-file-badge {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 14px;
+            padding: 6px 2px;
+            word-break: break-word;
+        }
+        .attachment-file-badge a {
+            color: inherit;
+            text-decoration: underline;
+        }
+        .attachment-loading {
+            font-size: 11px;
+            color: #999;
+        }
+
 
         /* ===== PASSWORD CHANGE MODAL ===== */
         .modal-overlay {
@@ -964,7 +991,7 @@
             </div>
             <div class="input-group">
                 <label>Password</label>
-                <input type="password" id="registerPassword" placeholder="Create a password (min 12 characters)"
+                <input type="password" id="registerPassword" placeholder="Min 12 chars, upper, lower, number, special (!@#$%…)"
                        autocomplete="new-password">
             </div>
             <div class="input-group">
@@ -1001,6 +1028,7 @@
             <div class="settings-item" id="profileMenuBtn">Profile</div>
             <div class="settings-item" id="settingsMenuBtn">Settings</div>
             <div class="settings-item" id="changePasswordMenuBtn">Change Password</div>
+            <div class="settings-item" id="adminMenuBtn" style="display:none;">Admin Settings</div>
             <div class="settings-item" id="logoutMenuBtn">Logout</div>
         </div>
 
@@ -1091,7 +1119,7 @@
         </div>
         <div class="input-group">
             <label>New Password</label>
-            <input type="password" id="newPassword" placeholder="Enter new password (min 12 characters)">
+            <input type="password" id="newPassword" placeholder="Min 12 chars, upper, lower, number, special (!@#$%…)">
         </div>
         <div class="input-group">
             <label>Confirm New Password</label>
@@ -1148,6 +1176,34 @@
     </div>
 </div>
 
+
+<!-- Admin Settings Modal -->
+<div id="adminSettingsModal" class="modal-overlay">
+    <div class="modal-content">
+        <h2>⚙️ Admin Settings</h2>
+        <p style="color:#666;font-size:13px;margin-bottom:16px;">
+            Configure maximum file sizes for attachments. Changes apply immediately to all users.
+        </p>
+
+        <div class="input-group">
+            <label>Max Image Size (MB) — JPEG &amp; PNG</label>
+            <input type="number" id="adminMaxImageSize" min="1" max="100" value="5"
+                   placeholder="e.g. 5">
+        </div>
+        <div class="input-group">
+            <label>Max File Size (MB) — DOC, TXT, PDF</label>
+            <input type="number" id="adminMaxFileSize" min="1" max="100" value="10"
+                   placeholder="e.g. 10">
+        </div>
+
+        <div id="adminSettingsStatus" class="status-message"></div>
+
+        <div class="modal-buttons">
+            <button class="btn-secondary" id="cancelAdminSettingsBtn">Cancel</button>
+            <button class="btn-primary" id="saveAdminSettingsBtn">Save</button>
+        </div>
+    </div>
+</div>
 
 <script src="/static/crypto.js"></script>
 <script src="/static/app.js"></script>

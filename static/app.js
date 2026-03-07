@@ -8,6 +8,7 @@ let currentUser = null;
 let currentRecipient = null;
 let websocket = null;
 let sessionToken = null;
+let isAdmin = false;  // Set after login; controls Admin Settings menu item visibility
 
 let userKeys = {
     publicKey: null,
@@ -194,6 +195,24 @@ async function handleRegister() {
 
     if (password.length < 12) {
         showStatus('authStatus', 'Password must be at least 12 characters', true);
+        return;
+    }
+
+    // Password strength: must contain uppercase, lowercase, digit, and special character
+    if (!/[A-Z]/.test(password)) {
+        showStatus('authStatus', 'Password must contain at least one uppercase letter', true);
+        return;
+    }
+    if (!/[a-z]/.test(password)) {
+        showStatus('authStatus', 'Password must contain at least one lowercase letter', true);
+        return;
+    }
+    if (!/\d/.test(password)) {
+        showStatus('authStatus', 'Password must contain at least one number', true);
+        return;
+    }
+    if (!/[!@#$%^&*()\-_=+\[\]{};':"\\|,.<>\/?`~]/.test(password)) {
+        showStatus('authStatus', 'Password must contain at least one special character (e.g. !@#$%)', true);
         return;
     }
 
@@ -384,8 +403,13 @@ async function handleLogin() {
                 userKeys.publicKey = data.public_key;
                 userKeys.privateKey = privateKey;
                 sessionToken = data.session_token;
+                isAdmin = data.is_admin || false;
 
                 sessionStorage.setItem('encryptedVault', data.encrypted_vault);
+
+                // Show Admin Settings menu item for admin users
+                const adminMenuBtn = document.getElementById('adminMenuBtn');
+                if (adminMenuBtn) adminMenuBtn.style.display = isAdmin ? 'block' : 'none';
 
                 // Store unread counts from server
                 unreadCounts = data.unread_counts || {};
@@ -451,6 +475,11 @@ async function restoreSessionFromServer(username, token, password) {
         sessionToken = token;
         userKeys.publicKey = data.public_key;
         userKeys.privateKey = privateKey;
+        isAdmin = data.is_admin || false;
+
+        // Show Admin Settings menu item for admin users
+        const adminMenuBtn = document.getElementById('adminMenuBtn');
+        if (adminMenuBtn) adminMenuBtn.style.display = isAdmin ? 'block' : 'none';
 
         unreadCounts = data.unread_counts || {};
         blockedUsers = data.blocked_users || [];
@@ -595,6 +624,24 @@ async function handlePasswordChange() {
 
     if (newPassword.length < 12) {
         showStatus('passwordStatus', 'Password must be at least 12 characters', true);
+        return;
+    }
+
+    // Password strength: must contain uppercase, lowercase, digit, and special character
+    if (!/[A-Z]/.test(newPassword)) {
+        showStatus('passwordStatus', 'New password must contain at least one uppercase letter', true);
+        return;
+    }
+    if (!/[a-z]/.test(newPassword)) {
+        showStatus('passwordStatus', 'New password must contain at least one lowercase letter', true);
+        return;
+    }
+    if (!/\d/.test(newPassword)) {
+        showStatus('passwordStatus', 'New password must contain at least one number', true);
+        return;
+    }
+    if (!/[!@#$%^&*()\-_=+\[\]{};':"\\|,.<>\/?`~]/.test(newPassword)) {
+        showStatus('passwordStatus', 'New password must contain at least one special character (e.g. !@#$%)', true);
         return;
     }
 
@@ -933,6 +980,23 @@ async function openChat(username) {
                 const payload = JSON.parse(msg.payload);
 
                 try {
+                    // Check if this is an attachment message
+                    if (payload.type === 'attachment') {
+                        const isImage = payload.category === 'image';
+                        const messageType = msg.is_sent ? 'sent' : 'received';
+                        chatHistory[username].push({
+                            text: `📎 ${payload.filename}`,
+                            type: messageType,
+                            timestamp: serverTimestamp,
+                            messageId: msg.id,
+                            status: msg.is_sent ? 'delivered' : null,
+                            reactions: msg.reactions || [],
+                            isAttachment: true,
+                            attachmentMeta: { filename: payload.filename, mimeType: payload.mime_type, isImage, payload, isSent: msg.is_sent },
+                        });
+                        continue;
+                    }
+
                     // Decrypt the message
                     const senderPublicKey = msg.is_sent ?
                         contacts.find(c => c.username === username)?.public_key :
@@ -995,8 +1059,29 @@ async function openChat(username) {
             lastDate = msgDate;
         }
 
-        const messageEl = createMessageElement(msg);
-        messagesArea.appendChild(messageEl);
+        if (msg.isAttachment) {
+            const { filename, mimeType, isImage, payload, isSent } = msg.attachmentMeta;
+            const el = createAttachmentElement({
+                filename, mimeType, isImage,
+                type: msg.type,
+                timestamp: msg.timestamp,
+                messageId: msg.messageId,
+                status: msg.status,
+                decryptedBlobUrl: null,
+            });
+            messagesArea.appendChild(el);
+
+            // Async decrypt and update
+            if (!isSent) {
+                (async () => {
+                    const blobUrl = await handleIncomingAttachment(payload, { from: username });
+                    if (blobUrl) updateAttachmentInUI(msg.messageId, filename, mimeType, isImage, blobUrl);
+                })();
+            }
+        } else {
+            const messageEl = createMessageElement(msg);
+            messagesArea.appendChild(messageEl);
+        }
     });
 
     // NO LONGER PROCESSING pendingMessagesStore here!
@@ -1303,6 +1388,31 @@ async function handleIncomingMessage(data) {
         const payload = JSON.parse(data.payload);
         const serverTimestamp = new Date(data.timestamp).getTime();
 
+        // ---- Attachment message ----
+        if (payload.type === 'attachment') {
+            const isImage = payload.category === 'image';
+            const displayText = `📎 ${payload.filename}`;
+
+            if (data.from !== currentRecipient) {
+                if (!unreadCounts[data.from]) unreadCounts[data.from] = 0;
+                unreadCounts[data.from]++;
+                saveToHistory(data.from, displayText, 'received', serverTimestamp, data.message_id, null);
+                renderUsersList();
+                return;
+            }
+
+            // Show placeholder immediately
+            addAttachmentMessageToUI(payload.filename, payload.mime_type, isImage, 'received', serverTimestamp, data.message_id, null, null);
+            saveToHistory(data.from, displayText, 'received', serverTimestamp, data.message_id, null);
+
+            // Decrypt and update
+            setTimeout(async () => {
+                const blobUrl = await handleIncomingAttachment(payload, data);
+                if (blobUrl) updateAttachmentInUI(data.message_id, payload.filename, payload.mime_type, isImage, blobUrl);
+            }, 100);
+            return;
+        }
+
         // If not in chat with sender, increment unread and store
         if (data.from !== currentRecipient) {
             if (!unreadCounts[data.from]) unreadCounts[data.from] = 0;
@@ -1400,6 +1510,32 @@ function updateMessageInUI(timestamp, newText) {
             textEl.classList.remove('encrypted');
         }
     });
+}
+
+function updateAttachmentInUI(messageId, filename, mimeType, isImage, blobUrl) {
+    const el = document.querySelector(`[data-message-id="${messageId}"]`);
+    if (!el || el.dataset.attachmentType !== 'attachment') return;
+    const bubble = el.querySelector('.message-bubble');
+    if (!bubble) return;
+
+    // Replace placeholder content (everything except the footer)
+    const footer = bubble.querySelector('.message-footer');
+    // Remove old content nodes
+    Array.from(bubble.childNodes).forEach(n => { if (n !== footer) n.remove(); });
+
+    let newContent;
+    if (isImage) {
+        newContent = document.createElement('img');
+        newContent.src = blobUrl;
+        newContent.className = 'attachment-image-preview';
+        newContent.alt = filename;
+        newContent.onclick = () => window.open(blobUrl, '_blank');
+    } else {
+        newContent = document.createElement('div');
+        newContent.className = 'attachment-file-badge';
+        newContent.innerHTML = `📎 <a href="${blobUrl}" download="${filename}">${filename}</a>`;
+    }
+    bubble.insertBefore(newContent, footer);
 }
 
 function updateHistoryMessage(username, timestamp, newText) {
@@ -1686,20 +1822,283 @@ async function toggleBlock() {
 
 // Toggle attachment menu
 function attachDoc() {
-    handleAttachment('document');
+    document.getElementById('attachmentMenu').classList.remove('show');
+    openFilePicker(['application/msword',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'text/plain', 'application/pdf'], '.doc,.docx,.txt,.pdf');
 }
 
 function attachCamera() {
-    handleAttachment('camera');
+    // Camera capture — open image picker with capture attribute
+    document.getElementById('attachmentMenu').classList.remove('show');
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/jpeg,image/png';
+    input.capture = 'environment';
+    input.onchange = (e) => handleFileSelected(e.target.files[0]);
+    input.click();
 }
 
 function attachGallery() {
-    handleAttachment('gallery');
+    document.getElementById('attachmentMenu').classList.remove('show');
+    openFilePicker(['image/jpeg', 'image/png'], '.jpg,.jpeg,.png');
 }
 
 function attachLocation() {
-    handleAttachment('location');
+    // Location is not a file type — keep existing stub behaviour
+    document.getElementById('attachmentMenu').classList.remove('show');
+    alert('Location sharing is not yet supported.');
 }
+
+function openFilePicker(mimeTypes, extensions) {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = extensions;
+    input.onchange = (e) => handleFileSelected(e.target.files[0]);
+    input.click();
+}
+
+// Attachment size config — fetched once on chat open and cached
+let attachmentConfig = null;
+
+async function fetchAttachmentConfig() {
+    try {
+        const res = await fetch('/api/admin/attachment-config');
+        if (res.ok) attachmentConfig = await res.json();
+    } catch (e) {
+        console.warn('Could not fetch attachment config:', e);
+    }
+}
+
+async function handleFileSelected(file) {
+    if (!file || !currentRecipient) return;
+
+    // Ensure config is loaded
+    if (!attachmentConfig) await fetchAttachmentConfig();
+
+    const mime = file.type.toLowerCase();
+    const allowed = ['image/jpeg', 'image/png',
+        'application/msword',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'text/plain', 'application/pdf'];
+
+    if (!allowed.includes(mime)) {
+        alert('Unsupported file type. Allowed: JPEG, PNG, DOC, TXT, PDF');
+        return;
+    }
+
+    const isImage = mime === 'image/jpeg' || mime === 'image/png';
+    const maxMb = attachmentConfig
+        ? (isImage ? attachmentConfig.max_image_size_mb : attachmentConfig.max_file_size_mb)
+        : (isImage ? 5 : 10);
+
+    if (file.size > maxMb * 1024 * 1024) {
+        alert(`File too large. Maximum size for ${isImage ? 'images' : 'documents'} is ${maxMb} MB.`);
+        return;
+    }
+
+    try {
+        // Read file as ArrayBuffer
+        const arrayBuffer = await file.arrayBuffer();
+
+        // Find recipient's public key
+        const recipientContact = contacts.find(c => c.username === currentRecipient);
+        if (!recipientContact) { alert('Recipient not found'); return; }
+
+        // Encrypt using same ECDH/AES-GCM flow as text messages
+        const encoder = new TextEncoder();
+        // We encrypt the raw bytes directly (not a string), so we convert to Uint8Array
+        const fileBytes = new Uint8Array(arrayBuffer);
+
+        const pub = await crypto.subtle.importKey(
+            'raw', base64ToArrayBuffer(recipientContact.public_key),
+            {name: 'ECDH', namedCurve: 'P-256'}, false, []
+        );
+        const priv = await crypto.subtle.importKey(
+            'pkcs8', base64ToArrayBuffer(userKeys.privateKey),
+            {name: 'ECDH', namedCurve: 'P-256'}, false, ['deriveKey']
+        );
+        const sharedKey = await crypto.subtle.deriveKey(
+            {name: 'ECDH', public: pub}, priv,
+            {name: 'AES-GCM', length: 256}, false, ['encrypt', 'decrypt']
+        );
+
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+        const ciphertext = await crypto.subtle.encrypt({name: 'AES-GCM', iv}, sharedKey, fileBytes);
+
+        const encryptedB64 = arrayBufferToBase64(ciphertext);
+        const nonceB64 = arrayBufferToBase64(iv.buffer);
+
+        // Show a sending indicator in the chat
+        const tempId = crypto.randomUUID();
+        const ts = Date.now();
+        addAttachmentMessageToUI(file.name, mime, isImage, 'sent', ts, tempId, 'sent', null);
+
+        // Upload to server
+        const res = await fetch('/api/attachment/upload', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                from_username: currentUser,
+                to_username: currentRecipient,
+                filename: file.name,
+                mime_type: mime,
+                encrypted_data: encryptedB64,
+                nonce: nonceB64,
+                sender_public_key: userKeys.publicKey,
+            })
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+            alert('Upload failed: ' + (data.detail || 'Unknown error'));
+            return;
+        }
+
+        // Save to local history as an attachment message
+        saveToHistory(currentRecipient, `📎 ${file.name}`, 'sent', ts, tempId, data.status === 'delivered' ? 'delivered' : 'sent');
+
+    } catch (err) {
+        console.error('Attachment error:', err);
+        alert('Error sending attachment: ' + err.message);
+    }
+}
+
+// ==================== ADMIN SETTINGS ====================
+function showAdminSettingsModal() {
+    closeSettings();
+    fetchAttachmentConfig().then(() => {
+        if (attachmentConfig) {
+            document.getElementById('adminMaxImageSize').value = attachmentConfig.max_image_size_mb;
+            document.getElementById('adminMaxFileSize').value = attachmentConfig.max_file_size_mb;
+        }
+        document.getElementById('adminSettingsModal').classList.add('show');
+    });
+}
+
+function hideAdminSettingsModal() {
+    document.getElementById('adminSettingsModal').classList.remove('show');
+    clearStatus('adminSettingsStatus');
+}
+
+async function handleSaveAdminSettings() {
+    const maxImage = parseInt(document.getElementById('adminMaxImageSize').value, 10);
+    const maxFile = parseInt(document.getElementById('adminMaxFileSize').value, 10);
+
+    if (!maxImage || !maxFile || maxImage < 1 || maxFile < 1 || maxImage > 100 || maxFile > 100) {
+        showStatus('adminSettingsStatus', 'Sizes must be between 1 and 100 MB', true);
+        return;
+    }
+
+    try {
+        const res = await fetch('/api/admin/attachment-config', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                admin_username: currentUser,
+                max_image_size_mb: maxImage,
+                max_file_size_mb: maxFile,
+            })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            attachmentConfig = { max_image_size_mb: maxImage, max_file_size_mb: maxFile };
+            showStatus('adminSettingsStatus', 'Saved successfully!', false);
+            setTimeout(hideAdminSettingsModal, 1500);
+        } else {
+            showStatus('adminSettingsStatus', data.detail || 'Save failed', true);
+        }
+    } catch (err) {
+        showStatus('adminSettingsStatus', 'Error: ' + err.message, true);
+    }
+}
+
+// ==================== ATTACHMENT MESSAGE UI ====================
+function addAttachmentMessageToUI(filename, mimeType, isImage, type, timestamp, messageId, status, decryptedBlobUrl) {
+    const messagesArea = document.getElementById('messagesArea');
+    const msgDate = formatDate(timestamp);
+
+    const lastDivider = messagesArea.querySelector('.date-divider:last-of-type');
+    const lastDividerText = lastDivider ? lastDivider.querySelector('span').textContent : null;
+    if (msgDate !== lastDividerText) {
+        const dateDivider = document.createElement('div');
+        dateDivider.className = 'date-divider';
+        dateDivider.innerHTML = `<span>${msgDate}</span>`;
+        messagesArea.appendChild(dateDivider);
+    }
+
+    const el = createAttachmentElement({filename, mimeType, isImage, type, timestamp, messageId, status, decryptedBlobUrl});
+    messagesArea.appendChild(el);
+    messagesArea.scrollTop = messagesArea.scrollHeight;
+}
+
+function createAttachmentElement({filename, mimeType, isImage, type, timestamp, messageId, status, decryptedBlobUrl}) {
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `message ${type}`;
+    messageDiv.dataset.messageId = messageId;
+    messageDiv.dataset.attachmentType = 'attachment';
+
+    const statusIcon = getStatusIcon(status);
+    let contentHtml = '';
+
+    if (isImage && decryptedBlobUrl) {
+        contentHtml = `<img src="${decryptedBlobUrl}" class="attachment-image-preview" alt="${filename}" 
+            onclick="window.open('${decryptedBlobUrl}', '_blank')">`;
+    } else if (isImage) {
+        contentHtml = `<div class="attachment-file-badge">🖼️ ${filename} <span class="attachment-loading">(loading…)</span></div>`;
+    } else if (decryptedBlobUrl) {
+        contentHtml = `<div class="attachment-file-badge">📎 <a href="${decryptedBlobUrl}" download="${filename}">${filename}</a></div>`;
+    } else {
+        contentHtml = `<div class="attachment-file-badge">📎 ${filename} <span class="attachment-loading">(loading…)</span></div>`;
+    }
+
+    messageDiv.innerHTML = `
+    <div class="message-bubble">
+        ${contentHtml}
+        <div class="message-footer">
+            <span>${formatTime(timestamp)}</span>
+            ${type === 'sent' ? `<span class="message-status">${statusIcon}</span>` : ''}
+        </div>
+    </div>`;
+
+    return messageDiv;
+}
+
+// Handle attachment payload in incoming messages
+async function handleIncomingAttachment(payload, data) {
+    const senderPublicKey = payload.sender_public_key;
+    const isImage = payload.category === 'image';
+
+    try {
+        // Decrypt the file bytes
+        const pub = await crypto.subtle.importKey(
+            'raw', base64ToArrayBuffer(senderPublicKey),
+            {name: 'ECDH', namedCurve: 'P-256'}, false, []
+        );
+        const priv = await crypto.subtle.importKey(
+            'pkcs8', base64ToArrayBuffer(userKeys.privateKey),
+            {name: 'ECDH', namedCurve: 'P-256'}, false, ['deriveKey']
+        );
+        const sharedKey = await crypto.subtle.deriveKey(
+            {name: 'ECDH', public: pub}, priv,
+            {name: 'AES-GCM', length: 256}, false, ['encrypt', 'decrypt']
+        );
+
+        const iv = new Uint8Array(base64ToArrayBuffer(payload.nonce));
+        const ct = base64ToArrayBuffer(payload.ciphertext);
+        const decrypted = await crypto.subtle.decrypt({name: 'AES-GCM', iv}, sharedKey, ct);
+
+        const blob = new Blob([decrypted], {type: payload.mime_type});
+        const blobUrl = URL.createObjectURL(blob);
+
+        return blobUrl;
+    } catch (e) {
+        console.error('Attachment decryption failed:', e);
+        return null;
+    }
+}
+
+
 
 function toggleAttachmentMenu() {
     const attachmentMenu = document.getElementById('attachmentMenu');
@@ -1720,109 +2119,6 @@ function closeAttachmentOnClickOutside(event) {
         document.removeEventListener('click', closeAttachmentOnClickOutside);
     }
 }
-
-// Handle attachment selection
-function handleAttachment(type) {
-    const attachmentMenu = document.getElementById('attachmentMenu');
-    attachmentMenu.classList.remove('show');
-
-    const messagesContainer = document.getElementById('messagesContainer');
-    const currentTime = new Date();
-    const timestamp = currentTime.toLocaleTimeString('en-US', {
-        hour: 'numeric',
-        minute: '2-digit',
-        hour12: true
-    });
-
-    let attachmentText = '';
-    let emoji = '';
-
-    switch (type) {
-        case 'document':
-            attachmentText = '📄 Document_2024.pdf';
-            emoji = '📄';
-            break;
-        case 'camera':
-            attachmentText = '📷 Photo captured';
-            emoji = '📷';
-            break;
-        case 'gallery':
-            attachmentText = '🖼️ Image_001.jpg';
-            emoji = '🖼️';
-            break;
-        case 'location':
-            attachmentText = '📍 Current Location';
-            emoji = '📍';
-            break;
-    }
-
-    const newMessage = {
-        id: currentUser.messages.length + 1,
-        text: attachmentText,
-        sender: 'sent',
-        timestamp: timestamp,
-        date: 'Today'
-    };
-
-    currentUser.messages.push(newMessage);
-    currentUser.lastMessage = `You: ${emoji} ${type}`;
-    currentUser.lastMessageTime = timestamp;
-
-    const messageDiv = document.createElement('div');
-    messageDiv.className = 'message sent';
-
-    messageDiv.innerHTML = `
-                <div class="message-bubble">
-                    <div class="message-text">${attachmentText}</div>
-                    <div class="message-timestamp">${timestamp}</div>
-                </div>
-            `;
-
-    messagesContainer.appendChild(messageDiv);
-    messagesContainer.scrollTop = messagesContainer.scrollHeight;
-
-    console.log(`${emoji} ${type.charAt(0).toUpperCase() + type.slice(1)} sent successfully`);
-
-    setTimeout(() => {
-        const replyTexts = {
-            'document': 'Thanks for the document!',
-            'camera': 'Nice photo!',
-            'gallery': 'Great picture!',
-            'location': 'Got your location, thanks!'
-        };
-
-        const replyTime = new Date();
-        const replyTimestamp = replyTime.toLocaleTimeString('en-US', {
-            hour: 'numeric',
-            minute: '2-digit',
-            hour12: true
-        });
-
-        const replyMessage = {
-            id: currentUser.messages.length + 1,
-            text: replyTexts[type],
-            sender: 'received',
-            timestamp: replyTimestamp,
-            date: 'Today'
-        };
-
-        currentUser.messages.push(replyMessage);
-
-        const replyDiv = document.createElement('div');
-        replyDiv.className = 'message received';
-
-        replyDiv.innerHTML = `
-                    <div class="message-bubble">
-                        <div class="message-text">${replyTexts[type]}</div>
-                        <div class="message-timestamp">${replyTimestamp}</div>
-                    </div>
-                `;
-
-        messagesContainer.appendChild(replyDiv);
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
-    }, 1500);
-}
-
 
 // ==================== INITIALIZATION ====================
 document.addEventListener('DOMContentLoaded', () => {
@@ -1859,6 +2155,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('profileMenuBtn').addEventListener('click', showProfileModal);
     document.getElementById('settingsMenuBtn').addEventListener('click', showSettingsModal);
     document.getElementById('changePasswordMenuBtn').addEventListener('click', showChangePasswordModal);
+    document.getElementById('adminMenuBtn').addEventListener('click', showAdminSettingsModal);
     document.getElementById('logoutMenuBtn').addEventListener('click', handleLogout);
 
     // Search input
@@ -1921,6 +2218,13 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.target.id === 'passwordModal') {
             hidePasswordModal();
         }
+    });
+
+    // ===== ADMIN SETTINGS MODAL LISTENERS =====
+    document.getElementById('saveAdminSettingsBtn').addEventListener('click', handleSaveAdminSettings);
+    document.getElementById('cancelAdminSettingsBtn').addEventListener('click', hideAdminSettingsModal);
+    document.getElementById('adminSettingsModal').addEventListener('click', (e) => {
+        if (e.target.id === 'adminSettingsModal') hideAdminSettingsModal();
     });
 
     // ===== MOBILE VIEWPORT HEIGHT =====
