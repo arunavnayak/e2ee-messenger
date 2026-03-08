@@ -409,7 +409,13 @@ async def login(req: LoginRequest, request: Request, db: Session = Depends(get_d
             "username": req.username,
             "message": "Account email not verified. Please verify via OTP.",
         }
-        # raise HTTPException(status_code=403, detail="Account email not verified. Please verify via OTP.")
+
+    if not user.is_authorized:
+        return {
+            "status": "pending_approval",
+            "username": req.username,
+            "message": "Your account is awaiting admin approval. Please check back later.",
+        }
 
     # Use constant-time comparison to prevent timing attacks
     if not user or not constant_time_compare(user.auth_hash, req.auth_hash):
@@ -517,6 +523,13 @@ async def restore_session(req: RestoreSessionRequest, db: Session = Depends(get_
             "status": "pending_verification",
             "username": req.username,
             "message": "Account email not verified. Please verify via OTP.",
+        }
+
+    if not user.is_authorized:
+        return {
+            "status": "pending_approval",
+            "username": req.username,
+            "message": "Your account is awaiting admin approval. Please check back later.",
         }
 
     vault = db.query(EncryptedVault).filter(
@@ -1311,6 +1324,11 @@ async def websocket_endpoint(websocket: WebSocket, username: str):
         manager.disconnect(username)
         db.close()
 
+class ApproveUserRequest(BaseModel):
+    username: str          # admin performing the action
+    target_username: str   # user being approved
+
+
 class ToggleReactionRequest(BaseModel):
     message_id: int          # or str, if you're using a string ID on the client and mapping it server-side
     emoji: str               # the emoji being toggled (e.g. "❤️", "😂")
@@ -1339,6 +1357,49 @@ async def toggle_reaction(req: ToggleReactionRequest, db: Session = Depends(get_
     db.add(new)
     db.commit()
     return {"status": "added"}
+
+
+# ==================== ADMIN USER APPROVAL ENDPOINTS ====================
+
+@app.get("/api/admin/pending-users")
+async def get_pending_users(username: str, db: Session = Depends(get_db)):
+    """Return users who are email-verified but not yet admin-approved"""
+    requester = db.query(User).filter(User.username == username).first()
+    if not requester or not requester.is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    pending = db.query(User).filter(
+        User.is_verified == True,   # noqa: E712
+        User.is_authorized == False  # noqa: E712
+    ).all()
+
+    return {
+        "pending_users": [
+            {
+                "username": u.username,
+                "email": u.email,
+                "created_at": u.created_at.isoformat(timespec="seconds"),
+            }
+            for u in pending
+        ]
+    }
+
+
+@app.post("/api/admin/approve-user")
+async def approve_user(req: ApproveUserRequest, db: Session = Depends(get_db)):
+    """Admin approves a pending user, allowing them to log in"""
+    requester = db.query(User).filter(User.username == req.username).first()
+    if not requester or not requester.is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    target = db.query(User).filter(User.username == req.target_username).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    target.is_authorized = True
+    db.commit()
+
+    return {"status": "success", "message": f"User '{req.target_username}' approved"}
 
 
 # ==================== STATIC FILES ====================

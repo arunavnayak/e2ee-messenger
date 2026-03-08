@@ -397,6 +397,9 @@ async function handleLogin() {
                 showStatus('authStatus', data.message, false);
                 // Redirect to verification page or modal
                 openOTPVerification(username);
+            } else if (data.status === 'pending_approval') {
+                showStatus('authStatus', '', false);
+                showPendingApprovalModal();
             } else {
                 showStatus('authStatus', 'Decrypting vault...', false);
 
@@ -471,6 +474,15 @@ async function restoreSessionFromServer(username, token, password) {
 
         const data = await response.json();
         if (!response.ok || data.status !== "success") {
+            // Handle special statuses before giving up
+            if (data.status === 'pending_approval') {
+                showPendingApprovalModal();
+                return;
+            }
+            if (data.status === 'pending_verification') {
+                openOTPVerification(username);
+                return;
+            }
             console.warn("Session restore failed:", data.detail || data.message);
             sessionStorage.clear();
             return;
@@ -2133,12 +2145,109 @@ function showAdminSettingsModal() {
             document.getElementById('adminMaxFileSize').value = attachmentConfig.max_file_size_mb;
         }
         document.getElementById('adminSettingsModal').classList.add('show');
+        loadPendingUsers();
     });
 }
 
 function hideAdminSettingsModal() {
     document.getElementById('adminSettingsModal').classList.remove('show');
     clearStatus('adminSettingsStatus');
+}
+
+// ==================== PENDING APPROVAL MODAL ====================
+function showPendingApprovalModal() {
+    document.getElementById('pendingApprovalModal').classList.add('show');
+}
+
+function hidePendingApprovalModal() {
+    document.getElementById('pendingApprovalModal').classList.remove('show');
+}
+
+// ==================== ADMIN: PENDING USER APPROVALS ====================
+async function loadPendingUsers() {
+    const list = document.getElementById('pendingUsersList');
+    if (!list) return;
+    list.innerHTML = '<p class="no-pending-msg">Loading...</p>';
+
+    try {
+        const res = await fetch(`/api/admin/pending-users?username=${encodeURIComponent(currentUser)}`);
+        if (!res.ok) { list.innerHTML = '<p class="no-pending-msg">Could not load pending users.</p>'; return; }
+        const data = await res.json();
+
+        if (!data.pending_users || data.pending_users.length === 0) {
+            list.innerHTML = '<p class="no-pending-msg">No pending approvals.</p>';
+            return;
+        }
+
+        list.innerHTML = '';
+        data.pending_users.forEach(u => {
+            const row = document.createElement('div');
+            row.className = 'pending-user-row';
+            row.dataset.username = u.username;
+
+            const info = document.createElement('div');
+            info.className = 'pending-user-info';
+
+            const nameEl = document.createElement('span');
+            nameEl.className = 'pending-user-name';
+            nameEl.textContent = u.username;
+
+            const emailEl = document.createElement('span');
+            emailEl.className = 'pending-user-email';
+            emailEl.textContent = u.email;
+
+            info.appendChild(nameEl);
+            info.appendChild(emailEl);
+
+            const btn = document.createElement('button');
+            btn.className = 'approve-btn';
+            btn.textContent = 'Approve';
+            btn.addEventListener('click', () => approveUser(u.username, btn));
+
+            row.appendChild(info);
+            row.appendChild(btn);
+            list.appendChild(row);
+        });
+    } catch (e) {
+        list.innerHTML = '<p class="no-pending-msg">Error loading pending users.</p>';
+        console.error('loadPendingUsers error:', e);
+    }
+}
+
+async function approveUser(targetUsername, btn) {
+    btn.disabled = true;
+    btn.textContent = 'Approving...';
+    try {
+        const res = await fetch('/api/admin/approve-user', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ username: currentUser, target_username: targetUsername })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            btn.textContent = '✓ Approved';
+            btn.style.background = '#d1fae5';
+            btn.style.color = '#065f46';
+            // Remove row after a short delay
+            setTimeout(() => {
+                const row = document.querySelector(`.pending-user-row[data-username="${targetUsername}"]`);
+                if (row) row.remove();
+                // If no more rows, show empty message
+                const list = document.getElementById('pendingUsersList');
+                if (list && list.children.length === 0) {
+                    list.innerHTML = '<p class="no-pending-msg">No pending approvals.</p>';
+                }
+            }, 1200);
+        } else {
+            btn.textContent = 'Approve';
+            btn.disabled = false;
+            alert(data.detail || 'Approval failed');
+        }
+    } catch (e) {
+        btn.textContent = 'Approve';
+        btn.disabled = false;
+        console.error('approveUser error:', e);
+    }
 }
 
 async function handleSaveAdminSettings() {
@@ -2496,7 +2605,13 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.target.id === 'adminSettingsModal') hideAdminSettingsModal();
     });
 
-    // ===== IMAGE LIGHTBOX — backdrop click + Save/Close buttons =====
+    // ===== PENDING APPROVAL MODAL =====
+    document.getElementById('pendingApprovalOkBtn').addEventListener('click', hidePendingApprovalModal);
+    document.getElementById('pendingApprovalModal').addEventListener('click', (e) => {
+        if (e.target.id === 'pendingApprovalModal') hidePendingApprovalModal();
+    });
+
+    // ===== IMAGE LIGHTBOX — close on backdrop click + Save/Close buttons =====
     document.getElementById('imageLightbox').addEventListener('click', (e) => {
         if (e.target.id === 'imageLightbox') closeImageLightbox();
     });

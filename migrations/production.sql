@@ -107,3 +107,35 @@ CREATE TABLE IF NOT EXISTS message_reactions (
 
 CREATE INDEX IF NOT EXISTS idx_reactions_message_id
     ON message_reactions(message_id);
+
+--
+CREATE TABLE attachment_config (
+    id SERIAL PRIMARY KEY,
+    max_image_size_mb INTEGER NOT NULL DEFAULT 5,
+    max_file_size_mb INTEGER NOT NULL DEFAULT 10,
+    updated_by VARCHAR(32),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+--
+CREATE OR REPLACE FUNCTION update_timestamp()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER update_attachment_config_timestamp
+    BEFORE UPDATE ON attachment_config
+    FOR EACH ROW
+    EXECUTE FUNCTION update_timestamp();
+
+
+--
+ALTER TABLE users ADD COLUMN is_admin BOOLEAN DEFAULT FALSE;
+ALTER TABLE users ADD COLUMN is_authorized BOOLEAN DEFAULT FALSE;
+
+update users  set is_admin = true where id=1;
+update users  set is_authorized = true where id=1;
+

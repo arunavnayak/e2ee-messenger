@@ -15,7 +15,8 @@ class User(Base):
     auth_hash = Column(String(128), nullable=False)  # PBKDF2 hash for authentication
     public_key = Column(Text, nullable=False)  # X25519 public key (base64)
     is_verified = Column(Boolean, default=False)
-    is_admin = Column(Boolean, default=False, nullable=False)  # Admin flag — only admins can manage attachment config
+    is_authorized = Column(Boolean, default=False, nullable=False)  # Admin must approve before login
+    is_admin = Column(Boolean, default=False, nullable=False)  # Admin role
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
