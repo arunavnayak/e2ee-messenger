@@ -212,7 +212,7 @@ class CSPMiddleware(BaseHTTPMiddleware):
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+        response.headers["Permissions-Policy"] = "geolocation=(self), microphone=(self), camera=(self)"
 
         return response
 
@@ -1265,6 +1265,19 @@ async def websocket_endpoint(websocket: WebSocket, username: str):
                 }
                 await manager.send_personal_message(payload, to_user)
                 await manager.send_personal_message(payload, from_user)
+
+            elif data.get("type") == "signal":
+                # WebRTC signaling relay for video calls
+                signal_to = data.get("to")
+                if signal_to and signal_to in manager.active_connections:
+                    await manager.send_personal_message(
+                        {
+                            "type": "signal",
+                            "signal": data.get("signal"),
+                            "from": username,
+                        },
+                        signal_to
+                    )
 
             elif data.get("type") == "reaction_toggle":
                 msg_id = data.get("message_id")

@@ -745,6 +745,9 @@ function connectWebSocket() {
             showTypingIndicator(data.from);
         } else if (data.type === 'reaction_toggle') {
             applyReactionToggle(data);
+        } else if (data.type === 'signal') {
+            // WebRTC signaling relay
+            handleCallSignal(data.signal);
         }
     };
 
@@ -1003,6 +1006,31 @@ async function openChat(username) {
                 const payload = JSON.parse(msg.payload);
 
                 try {
+                    // Check if this is a location message
+                    if (payload.type === 'location_message') {
+                        const senderPub = msg.is_sent
+                            ? contacts.find(c => c.username === username)?.public_key
+                            : payload.sender_public_key;
+                        if (senderPub) {
+                            try {
+                                const decrypted = await CryptoManager.decryptMessage(
+                                    payload.ciphertext, payload.nonce, senderPub, userKeys.privateKey
+                                );
+                                const locData = JSON.parse(decrypted);
+                                chatHistory[username].push({
+                                    text: '📍 Location',
+                                    type: msg.is_sent ? 'sent' : 'received',
+                                    timestamp: serverTimestamp,
+                                    messageId: msg.id,
+                                    status: msg.is_sent ? 'delivered' : null,
+                                    isLocation: true,
+                                    locationMeta: { lat: locData.lat, lng: locData.lng },
+                                });
+                            } catch(e) { console.error('Location history decrypt error:', e); }
+                        }
+                        continue;
+                    }
+
                     // Check if this is an attachment message
                     if (payload.type === 'attachment') {
                         const isImage = payload.category === 'image';
@@ -1082,7 +1110,11 @@ async function openChat(username) {
             lastDate = msgDate;
         }
 
-        if (msg.isAttachment) {
+        if (msg.isLocation) {
+            const { lat, lng } = msg.locationMeta;
+            const el = createLocationElement({ lat, lng, type: msg.type, timestamp: msg.timestamp, messageId: msg.messageId, status: msg.status });
+            messagesArea.appendChild(el);
+        } else if (msg.isAttachment) {
             const { filename, mimeType, isImage, payload, isSent } = msg.attachmentMeta;
             const el = createAttachmentElement({
                 filename, mimeType, isImage,
@@ -1111,8 +1143,12 @@ async function openChat(username) {
     // NO LONGER PROCESSING pendingMessagesStore here!
     // It's already included in the server response above
 
-    // Scroll to bottom
-    messagesArea.scrollTop = messagesArea.scrollHeight;
+    // Scroll to bottom — use rAF to ensure DOM has painted first
+    requestAnimationFrame(() => {
+        messagesArea.scrollTop = messagesArea.scrollHeight;
+        // Double rAF for async decryption updates
+        requestAnimationFrame(() => { messagesArea.scrollTop = messagesArea.scrollHeight; });
+    });
 
     // Send read receipt
     if (websocket && websocket.readyState === WebSocket.OPEN) {
@@ -1412,6 +1448,27 @@ async function handleIncomingMessage(data) {
         const payload = JSON.parse(data.payload);
         const serverTimestamp = new Date(data.timestamp).getTime();
 
+        // ---- Location message ----
+        if (payload.type === 'location_message') {
+            // Decrypt to get lat/lng
+            try {
+                const decrypted = await CryptoManager.decryptMessage(
+                    payload.ciphertext, payload.nonce, payload.sender_public_key, userKeys.privateKey
+                );
+                const locData = JSON.parse(decrypted);
+                if (data.from !== currentRecipient) {
+                    if (!unreadCounts[data.from]) unreadCounts[data.from] = 0;
+                    unreadCounts[data.from]++;
+                    saveToHistory(data.from, '📍 Location', 'received', serverTimestamp, data.message_id, null);
+                    renderUsersList();
+                    return;
+                }
+                addLocationMessageToUI(locData.lat, locData.lng, 'received', serverTimestamp, data.message_id, null);
+                saveToHistory(data.from, '📍 Location', 'received', serverTimestamp, data.message_id, null);
+            } catch(e) { console.error('Location decrypt failed:', e); }
+            return;
+        }
+
         // ---- Attachment message ----
         if (payload.type === 'attachment') {
             const isImage = payload.category === 'image';
@@ -1543,13 +1600,13 @@ function updateAttachmentInUI(messageId, filename, mimeType, isImage, blobUrl) {
     if (!bubble) return;
     const isSent = el.classList.contains('sent');
 
-    // Grab the existing time/tick footer so we can move it inside the new card
+    // Grab existing footer to reuse timestamp
     const existingFooter = bubble.querySelector('.attach-footer');
 
     const displayName = filename.length > 28 ? filename.slice(0, 24) + '…' + filename.slice(filename.lastIndexOf('.')) : filename;
     const iconSvg = getAttachmentIcon(mimeType, isImage);
 
-    // Clear bubble, then rebuild
+    // Clear bubble, rebuild
     bubble.innerHTML = '';
 
     let newCard;
@@ -1577,12 +1634,16 @@ function updateAttachmentInUI(messageId, filename, mimeType, isImage, blobUrl) {
         newCard._blobUrl = blobUrl;
         newCard._filename = filename;
 
-        const body = document.createElement('div');
-        body.className = 'attach-card-body';
+        // Top row: icon + meta
+        const topRow = document.createElement('div');
+        topRow.className = 'attach-card-top';
 
         const iconWrap = document.createElement('div');
         iconWrap.className = 'attach-icon-wrap';
         iconWrap.innerHTML = iconSvg;
+
+        const body = document.createElement('div');
+        body.className = 'attach-card-body';
 
         const meta = document.createElement('div');
         meta.className = 'attach-meta';
@@ -1601,11 +1662,13 @@ function updateAttachmentInUI(messageId, filename, mimeType, isImage, blobUrl) {
 
         meta.appendChild(nameSpan);
         meta.appendChild(dlBtn);
-        body.appendChild(iconWrap);
         body.appendChild(meta);
-        newCard.appendChild(body);
+        topRow.appendChild(iconWrap);
+        topRow.appendChild(body);
+        newCard.appendChild(topRow);
     }
-    // Re-append the time/tick footer INSIDE the new card
+
+    // Re-attach the existing footer INSIDE the card at the bottom
     if (existingFooter) newCard.appendChild(existingFooter);
     bubble.appendChild(newCard);
 }
@@ -1804,8 +1867,266 @@ function handleMessageKeydown(event) {
 
 // ==================== CHAT SETTINGS ====================
 
+// ==================== VIDEO CALL ====================
+// WebRTC state
+let localStream = null;
+let peerConnection = null;
+let callRingtone = null;
+let callTimerInterval = null;
+let callSeconds = 0;
+let isMuted = false;
+let isVideoOff = false;
+let pendingOffer = null;   // store offer from incoming call
+let callPeer = null;       // who we're calling / being called by
+
+const RTC_CONFIG = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+
 function startVideoCall() {
-    alert('startVideoCall');
+    if (!currentRecipient) return;
+    callPeer = currentRecipient;
+
+    // Show outgoing modal
+    document.getElementById('outgoingCallAvatar').textContent = getInitials(callPeer);
+    document.getElementById('outgoingCallName').textContent = callPeer;
+    document.getElementById('outgoingCallModal').style.display = 'flex';
+
+    // Play ringtone on caller side
+    playRingtone();
+
+    // Init WebRTC and send offer
+    initCallAsInitiator();
+}
+
+async function initCallAsInitiator() {
+    try {
+        localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+
+        peerConnection = new RTCPeerConnection(RTC_CONFIG);
+        localStream.getTracks().forEach(t => peerConnection.addTrack(t, localStream));
+
+        peerConnection.onicecandidate = (e) => {
+            if (e.candidate) {
+                sendSignal({ type: 'ice_candidate', candidate: e.candidate, to: callPeer, from: currentUser });
+            }
+        };
+
+        peerConnection.ontrack = (e) => {
+            const remoteVideo = document.getElementById('remoteVideo');
+            if (remoteVideo) remoteVideo.srcObject = e.streams[0];
+        };
+
+        const offer = await peerConnection.createOffer();
+        await peerConnection.setLocalDescription(offer);
+
+        sendSignal({ type: 'call_offer', offer, to: callPeer, from: currentUser });
+    } catch (err) {
+        console.error('Video init error:', err);
+        alert('Could not access camera/microphone: ' + err.message);
+        cancelOutgoingCall();
+    }
+}
+
+function cancelOutgoingCall() {
+    stopRingtone();
+    sendSignal({ type: 'call_cancel', to: callPeer, from: currentUser });
+    closePeerConnection();
+    document.getElementById('outgoingCallModal').style.display = 'none';
+    callPeer = null;
+}
+
+function declineCall() {
+    stopRingtone();
+    sendSignal({ type: 'call_declined', to: callPeer, from: currentUser });
+    closePeerConnection();
+    document.getElementById('incomingCallModal').style.display = 'none';
+    pendingOffer = null;
+    callPeer = null;
+}
+
+async function acceptCall() {
+    stopRingtone();
+    document.getElementById('incomingCallModal').style.display = 'none';
+
+    try {
+        localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+
+        peerConnection = new RTCPeerConnection(RTC_CONFIG);
+        localStream.getTracks().forEach(t => peerConnection.addTrack(t, localStream));
+
+        peerConnection.onicecandidate = (e) => {
+            if (e.candidate) {
+                sendSignal({ type: 'ice_candidate', candidate: e.candidate, to: callPeer, from: currentUser });
+            }
+        };
+
+        peerConnection.ontrack = (e) => {
+            const remoteVideo = document.getElementById('remoteVideo');
+            if (remoteVideo) remoteVideo.srcObject = e.streams[0];
+        };
+
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(pendingOffer));
+        const answer = await peerConnection.createAnswer();
+        await peerConnection.setLocalDescription(answer);
+
+        sendSignal({ type: 'call_answer', answer, to: callPeer, from: currentUser });
+
+        showActiveCallUI();
+    } catch (err) {
+        console.error('Accept call error:', err);
+        alert('Could not access camera/microphone: ' + err.message);
+        declineCall();
+    }
+}
+
+function showActiveCallUI() {
+    const localVideo = document.getElementById('localVideo');
+    if (localStream && localVideo) localVideo.srcObject = localStream;
+
+    document.getElementById('outgoingCallModal').style.display = 'none';
+    document.getElementById('incomingCallModal').style.display = 'none';
+    document.getElementById('activeCallModal').style.display = 'flex';
+
+    // Start timer
+    callSeconds = 0;
+    document.getElementById('callTimer').style.display = 'block';
+    document.getElementById('callStatusText').style.display = 'none';
+    callTimerInterval = setInterval(() => {
+        callSeconds++;
+        const m = String(Math.floor(callSeconds / 60)).padStart(2, '0');
+        const s = String(callSeconds % 60).padStart(2, '0');
+        document.getElementById('callTimer').textContent = `${m}:${s}`;
+    }, 1000);
+}
+
+function endCall() {
+    sendSignal({ type: 'call_end', to: callPeer, from: currentUser });
+    closeCallUI();
+}
+
+function closeCallUI() {
+    stopRingtone();
+    clearInterval(callTimerInterval);
+    callTimerInterval = null;
+    document.getElementById('callTimer').style.display = 'none';
+    document.getElementById('callStatusText').style.display = 'block';
+    document.getElementById('callStatusText').textContent = 'Connecting…';
+    document.getElementById('activeCallModal').style.display = 'none';
+    document.getElementById('outgoingCallModal').style.display = 'none';
+    document.getElementById('incomingCallModal').style.display = 'none';
+    closePeerConnection();
+    callPeer = null;
+    pendingOffer = null;
+    isMuted = false;
+    isVideoOff = false;
+    document.getElementById('muteAudioBtn').textContent = '🎙️';
+    document.getElementById('toggleVideoBtn').textContent = '📹';
+}
+
+function closePeerConnection() {
+    if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
+    if (peerConnection) { peerConnection.close(); peerConnection = null; }
+    const rv = document.getElementById('remoteVideo');
+    const lv = document.getElementById('localVideo');
+    if (rv) rv.srcObject = null;
+    if (lv) lv.srcObject = null;
+}
+
+function toggleCallAudio() {
+    if (!localStream) return;
+    isMuted = !isMuted;
+    localStream.getAudioTracks().forEach(t => t.enabled = !isMuted);
+    document.getElementById('muteAudioBtn').textContent = isMuted ? '🔇' : '🎙️';
+    document.getElementById('muteAudioBtn').style.background = isMuted ? 'rgba(229,62,62,0.7)' : 'rgba(255,255,255,0.2)';
+}
+
+function toggleCallVideo() {
+    if (!localStream) return;
+    isVideoOff = !isVideoOff;
+    localStream.getVideoTracks().forEach(t => t.enabled = !isVideoOff);
+    document.getElementById('toggleVideoBtn').textContent = isVideoOff ? '🚫' : '📹';
+    document.getElementById('toggleVideoBtn').style.background = isVideoOff ? 'rgba(229,62,62,0.7)' : 'rgba(255,255,255,0.2)';
+}
+
+function sendSignal(data) {
+    if (websocket && websocket.readyState === WebSocket.OPEN) {
+        websocket.send(JSON.stringify({ type: 'signal', signal: data, to: data.to, from: currentUser }));
+    }
+}
+
+async function handleCallSignal(signal) {
+    switch (signal.type) {
+        case 'call_offer':
+            callPeer = signal.from;
+            pendingOffer = signal.offer;
+            document.getElementById('incomingCallAvatar').textContent = getInitials(signal.from);
+            document.getElementById('incomingCallName').textContent = signal.from;
+            document.getElementById('incomingCallModal').style.display = 'flex';
+            playRingtone();
+            break;
+
+        case 'call_answer':
+            if (peerConnection) {
+                await peerConnection.setRemoteDescription(new RTCSessionDescription(signal.answer));
+                showActiveCallUI();
+            }
+            break;
+
+        case 'ice_candidate':
+            if (peerConnection && signal.candidate) {
+                try { await peerConnection.addIceCandidate(new RTCIceCandidate(signal.candidate)); } catch(e) {}
+            }
+            break;
+
+        case 'call_declined':
+            stopRingtone();
+            document.getElementById('outgoingCallModal').style.display = 'none';
+            closePeerConnection();
+            callPeer = null;
+            alert(`${signal.from} declined the call.`);
+            break;
+
+        case 'call_cancel':
+            stopRingtone();
+            document.getElementById('incomingCallModal').style.display = 'none';
+            closePeerConnection();
+            callPeer = null;
+            pendingOffer = null;
+            break;
+
+        case 'call_end':
+            closeCallUI();
+            break;
+    }
+}
+
+function playRingtone() {
+    try {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContext) return;
+        const ctx = new AudioContext();
+        function beep() {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain); gain.connect(ctx.destination);
+            osc.frequency.setValueAtTime(480, ctx.currentTime);
+            osc.frequency.setValueAtTime(620, ctx.currentTime + 0.3);
+            gain.gain.setValueAtTime(0.4, ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
+            osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.65);
+        }
+        beep();
+        callRingtone = setInterval(beep, 1200);
+        // store ctx so we can stop it
+        callRingtone._ctx = ctx;
+    } catch(e) { console.warn('Ringtone error:', e); }
+}
+
+function stopRingtone() {
+    if (callRingtone) {
+        clearInterval(callRingtone);
+        try { if (callRingtone._ctx) callRingtone._ctx.close(); } catch(e) {}
+        callRingtone = null;
+    }
 }
 
 function toggleChatSettings() {
@@ -2011,10 +2332,149 @@ function attachGallery() {
     openFilePicker(['image/jpeg', 'image/png'], '.jpg,.jpeg,.png');
 }
 
-function attachLocation() {
-    // Location is not a file type — keep existing stub behaviour
+async function attachLocation() {
     document.getElementById('attachmentMenu').classList.remove('show');
-    alert('Location sharing is not yet supported.');
+
+    if (!navigator.geolocation) {
+        alert('Geolocation is not supported by your browser.');
+        return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+        async (pos) => {
+            const lat = pos.coords.latitude.toFixed(6);
+            const lng = pos.coords.longitude.toFixed(6);
+
+            const locationPayload = JSON.stringify({
+                type: 'location',
+                lat: parseFloat(lat),
+                lng: parseFloat(lng),
+            });
+
+            // Encrypt like a normal message
+            try {
+                const recipientContact = contacts.find(c => c.username === currentRecipient);
+                if (!recipientContact) { alert('Could not find recipient.'); return; }
+
+                const encrypted = await CryptoManager.encryptMessage(
+                    locationPayload,
+                    recipientContact.public_key,
+                    userKeys.privateKey
+                );
+
+                const envelope = JSON.stringify({
+                    type: 'location_message',
+                    ciphertext: encrypted.ciphertext,
+                    nonce: encrypted.nonce,
+                    sender_public_key: userKeys.publicKey,
+                });
+
+                const timestamp = Date.now();
+                const messageId = `loc_${timestamp}`;
+
+                // Show in own chat
+                addLocationMessageToUI(parseFloat(lat), parseFloat(lng), 'sent', timestamp, messageId, 'sent');
+                saveToHistory(currentRecipient, `📍 Location`, 'sent', timestamp, messageId, 'sent');
+
+                // Send via WebSocket
+                if (websocket && websocket.readyState === WebSocket.OPEN) {
+                    websocket.send(JSON.stringify({
+                        type: 'message',
+                        from: currentUser,
+                        to: currentRecipient,
+                        payload: envelope,
+                        message_id: messageId,
+                    }));
+                }
+            } catch(e) {
+                alert('Failed to send location: ' + e.message);
+            }
+        },
+        (err) => {
+            alert('Could not get your location: ' + err.message);
+        },
+        { timeout: 10000, enableHighAccuracy: true }
+    );
+}
+
+function addLocationMessageToUI(lat, lng, type, timestamp, messageId, status) {
+    const messagesArea = document.getElementById('messagesArea');
+    const msgDate = formatDate(timestamp);
+
+    const lastDivider = messagesArea.querySelector('.date-divider:last-of-type');
+    const lastDividerText = lastDivider ? lastDivider.querySelector('span').textContent : null;
+    if (msgDate !== lastDividerText) {
+        const dd = document.createElement('div');
+        dd.className = 'date-divider';
+        dd.innerHTML = `<span>${msgDate}</span>`;
+        messagesArea.appendChild(dd);
+    }
+
+    const el = createLocationElement({ lat, lng, type, timestamp, messageId, status });
+    messagesArea.appendChild(el);
+    messagesArea.scrollTop = messagesArea.scrollHeight;
+}
+
+function createLocationElement({ lat, lng, type, timestamp, messageId, status }) {
+    const isSent = type === 'sent';
+    const mapsUrl = `https://www.google.com/maps?q=${lat},${lng}`;
+
+    const wrapper = document.createElement('div');
+    wrapper.className = `message ${isSent ? 'sent' : 'received'}`;
+    wrapper.dataset.messageId = messageId;
+
+    const bubble = document.createElement('div');
+    bubble.className = 'message-bubble';
+    bubble.style.padding = '4px 4px 4px';
+
+    // Build card using DOM (CSP-safe, no onclick)
+    const card = document.createElement('a');
+    card.href = mapsUrl;
+    card.target = '_blank';
+    card.rel = 'noopener noreferrer';
+    card.className = 'location-card';
+
+    // Green placeholder area — no pin emoji, just coords
+    const placeholder = document.createElement('div');
+    placeholder.className = 'location-map-placeholder';
+    const coords = document.createElement('span');
+    coords.className = 'loc-coords';
+    coords.textContent = `${lat}, ${lng}`;
+    placeholder.appendChild(coords);
+
+    // Footer row: pin icon + label
+    const footer = document.createElement('div');
+    footer.className = 'location-card-footer';
+    const icon = document.createElement('span');
+    icon.className = 'loc-icon';
+    icon.textContent = '📍';
+    const label = document.createElement('span');
+    label.textContent = 'My Location · Tap to open';
+    footer.appendChild(icon);
+    footer.appendChild(label);
+
+    card.appendChild(placeholder);
+    card.appendChild(footer);
+    bubble.appendChild(card);
+
+    // Time row — right-aligned, outside card but inside bubble
+    const timeRow = document.createElement('div');
+    timeRow.className = 'location-time-row';
+    const timeSpan = document.createElement('span');
+    timeSpan.className = 'message-time';
+    timeSpan.style.cssText = 'margin:0; padding:0 2px;';
+    timeSpan.textContent = formatTime(timestamp);
+    timeRow.appendChild(timeSpan);
+    if (isSent) {
+        const statusSpan = document.createElement('span');
+        statusSpan.className = 'message-status';
+        statusSpan.innerHTML = getStatusIcon(status);
+        timeRow.appendChild(statusSpan);
+    }
+    bubble.appendChild(timeRow);
+
+    wrapper.appendChild(bubble);
+    return wrapper;
 }
 
 function openFilePicker(mimeTypes, extensions) {
@@ -2316,7 +2776,6 @@ function createAttachmentElement({filename, mimeType, isImage, type, timestamp, 
         : filename;
     const iconSvg = getAttachmentIcon(mimeType, isImage);
 
-    // Build card using DOM methods only — no innerHTML with onclick (CSP-safe)
     let card;
 
     if (isImage && blobUrl) {
@@ -2338,7 +2797,6 @@ function createAttachmentElement({filename, mimeType, isImage, type, timestamp, 
 
         card.appendChild(img);
         card.appendChild(cardFoot);
-        // addEventListener — CSP-safe, no inline onclick
         card.addEventListener('click', () => openImageLightbox(blobUrl, filename));
 
     } else if (!isImage && blobUrl) {
@@ -2348,12 +2806,16 @@ function createAttachmentElement({filename, mimeType, isImage, type, timestamp, 
         card._blobUrl = blobUrl;
         card._filename = filename;
 
-        const body = document.createElement('div');
-        body.className = 'attach-card-body';
+        // Top row: icon + meta
+        const topRow = document.createElement('div');
+        topRow.className = 'attach-card-top';
 
         const iconWrap = document.createElement('div');
         iconWrap.className = 'attach-icon-wrap';
         iconWrap.innerHTML = iconSvg;
+
+        const body = document.createElement('div');
+        body.className = 'attach-card-body';
 
         const meta = document.createElement('div');
         meta.className = 'attach-meta';
@@ -2372,21 +2834,26 @@ function createAttachmentElement({filename, mimeType, isImage, type, timestamp, 
 
         meta.appendChild(nameSpan);
         meta.appendChild(dlBtn);
-        body.appendChild(iconWrap);
         body.appendChild(meta);
-        card.appendChild(body);
+        topRow.appendChild(iconWrap);
+        topRow.appendChild(body);
+        card.appendChild(topRow);
 
     } else {
         // Loading placeholder — blobUrl not ready yet
         card = document.createElement('div');
         card.className = `attach-card attach-card-file ${isSent ? 'sent' : 'received'}`;
 
-        const body = document.createElement('div');
-        body.className = 'attach-card-body';
+        // Top row: icon + meta
+        const topRow = document.createElement('div');
+        topRow.className = 'attach-card-top';
 
         const iconWrap = document.createElement('div');
         iconWrap.className = 'attach-icon-wrap';
         iconWrap.innerHTML = iconSvg;
+
+        const body = document.createElement('div');
+        body.className = 'attach-card-body';
 
         const meta = document.createElement('div');
         meta.className = 'attach-meta';
@@ -2401,15 +2868,17 @@ function createAttachmentElement({filename, mimeType, isImage, type, timestamp, 
 
         meta.appendChild(nameSpan);
         meta.appendChild(statusTxt);
-        body.appendChild(iconWrap);
         body.appendChild(meta);
-        card.appendChild(body);
+        topRow.appendChild(iconWrap);
+        topRow.appendChild(body);
+        card.appendChild(topRow);
     }
 
-    // Footer goes INSIDE the card — renders within the card's border/background
+    // Time/tick footer — INSIDE the card at the bottom-right
     const footer = document.createElement('div');
     footer.className = 'message-footer attach-footer';
     const timeSpan = document.createElement('span');
+    timeSpan.className = 'message-time';
     timeSpan.textContent = formatTime(timestamp);
     footer.appendChild(timeSpan);
     if (isSent) {
@@ -2420,7 +2889,7 @@ function createAttachmentElement({filename, mimeType, isImage, type, timestamp, 
     }
     card.appendChild(footer);
 
-    // Bubble is a transparent wrapper only
+    // Bubble wraps only the card — footer is inside it
     const bubble = document.createElement('div');
     bubble.className = 'message-bubble attach-bubble';
     bubble.appendChild(card);
@@ -2546,6 +3015,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Chat settings button
     document.getElementById('startVideoCallBtn').addEventListener('click', startVideoCall);
+
+    // Video call modal buttons — wired here (CSP-safe, no inline onclick)
+    document.getElementById('cancelOutgoingCallBtn').addEventListener('click', cancelOutgoingCall);
+    document.getElementById('declineCallBtn').addEventListener('click', declineCall);
+    document.getElementById('acceptCallBtn').addEventListener('click', acceptCall);
+    document.getElementById('endCallBtn').addEventListener('click', endCall);
+    document.getElementById('muteAudioBtn').addEventListener('click', toggleCallAudio);
+    document.getElementById('toggleVideoBtn').addEventListener('click', toggleCallVideo);
     document.getElementById('chatSettingsBtn').addEventListener('click', toggleChatSettings);
 
     // Chat settings menu items

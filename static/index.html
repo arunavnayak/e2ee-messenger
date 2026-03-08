@@ -395,7 +395,9 @@
         .messages-area {
             flex: 1;
             overflow-y: auto;
+            overflow-x: hidden;
             padding: 15px;
+            min-height: 0;
             background: #e5ddd5;
             background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect fill="%23e5ddd5" width="100" height="100"/><circle fill="%23d1c7bb" cx="50" cy="50" r="1" opacity="0.3"/></svg>');
         }
@@ -769,59 +771,68 @@
 
         /* ===== ATTACHMENT CARDS ===== */
         .attach-bubble {
-            padding: 6px 8px 4px !important;
+            padding: 4px 4px 4px !important;
+            min-width: 240px;
+            max-width: 280px;
+            background: transparent !important;
+            box-shadow: none !important;
+        }
+        .message.sent .attach-bubble,
+        .message.received .attach-bubble {
             background: transparent !important;
             box-shadow: none !important;
         }
 
-        /* Sent bubble wrapper re-styles */
-        .message.sent .attach-bubble { background: transparent !important; }
-        .message.received .attach-bubble { background: transparent !important; }
-
         .attach-card {
             display: flex;
-            flex-direction: column;
-            border-radius: 12px;
+            border-radius: 10px;
             overflow: hidden;
-            min-width: 220px;
-            max-width: 280px;
+            width: 100%;
             cursor: default;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.10);
-        }
-        /* Row inside file card: icon + meta side by side */
-        .attach-card-file .attach-card-body {
-            display: flex;
-            flex-direction: row;
-            align-items: center;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.08);
         }
 
-        /* File card (PDF / DOC / TXT) */
+        /* File card (PDF / DOC / TXT) — flex-column so time row stacks at bottom */
         .attach-card-file {
-            align-items: center;
-            gap: 0;
-            padding: 0;
+            flex-direction: column;
             background: #fff;
             border: 1.5px solid #e5e7eb;
+            border-radius: 10px;
         }
         .attach-card-file.sent {
-            background: #f0f2ff;
+            background: #eef0ff;
             border-color: #c7d0f8;
         }
 
+        /* Top row: icon + meta side by side */
+        .attach-card-top {
+            display: flex;
+            align-items: center;
+            width: 100%;
+        }
+
         .attach-icon-wrap {
-            width: 54px;
-            min-width: 54px;
-            height: 64px;
+            width: 52px;
+            min-width: 52px;
+            height: 60px;
             display: flex;
             align-items: center;
             justify-content: center;
-            background: rgba(0,0,0,0.04);
+            background: rgba(0,0,0,0.03);
             padding: 8px;
             border-right: 1.5px solid rgba(0,0,0,0.06);
+            flex-shrink: 0;
         }
         .attach-icon-wrap svg {
-            width: 36px;
-            height: 36px;
+            width: 34px;
+            height: 34px;
+        }
+
+        .attach-card-body {
+            display: flex;
+            align-items: center;
+            flex: 1;
+            min-width: 0;
         }
 
         .attach-meta {
@@ -829,7 +840,7 @@
             flex-direction: column;
             justify-content: center;
             gap: 5px;
-            padding: 8px 12px;
+            padding: 8px 10px;
             flex: 1;
             min-width: 0;
         }
@@ -838,7 +849,9 @@
             font-size: 13px;
             font-weight: 600;
             color: #1f2937;
-            word-break: break-word;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
             line-height: 1.3;
         }
         .attach-card-file.sent .attach-name { color: #2d3a8c; }
@@ -866,6 +879,18 @@
         }
         .attach-download-btn:hover { background: #4f5ec7; }
 
+        /* Time row — INSIDE the card, pinned bottom-right */
+        .attach-footer {
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            gap: 4px;
+            padding: 0 8px 5px;
+        }
+        .attach-footer .message-time { margin: 0; padding: 0; }
+        .attach-card-file.sent .attach-footer .message-time { color: #667eea; }
+        .attach-card-file.sent .attach-footer .message-status { color: #667eea; }
+
         /* Image card */
         .attach-card-image {
             flex-direction: column;
@@ -874,6 +899,7 @@
             cursor: pointer;
             transition: opacity 0.2s;
             max-width: 240px;
+            border-radius: 10px;
         }
         .attach-card-image:hover { opacity: 0.92; }
 
@@ -893,144 +919,6 @@
             color: #e5e7eb;
             font-weight: 500;
         }
-
-        /* Attachment bubble: transparent wrapper, no padding */
-        .message.sent .attach-bubble,
-        .message.received .attach-bubble {
-            padding: 0 !important;
-            background: transparent !important;
-            box-shadow: none !important;
-            border-radius: 0 !important;
-        }
-        /* Time + ticks row sits at the bottom of the card */
-        .attach-footer {
-            display: flex;
-            align-items: center;
-            justify-content: flex-end;
-            gap: 4px;
-            font-size: 11px;
-            padding: 3px 8px 5px;
-        }
-        .attach-card-file.received .attach-footer {
-            background: #fff;
-            color: #9ca3af;
-            border-top: 1px solid rgba(0,0,0,0.06);
-        }
-        .attach-card-file.sent .attach-footer {
-            background: #f0f2ff;
-            color: #6b7fcc;
-            border-top: 1px solid rgba(103,126,234,0.15);
-        }
-        .attach-card-image .attach-footer {
-            background: rgba(0,0,0,0.55);
-            color: rgba(255,255,255,0.85);
-        }
-        /* ===== PENDING APPROVAL MODAL ===== */
-        #pendingApprovalModal {
-            display: none;
-            position: fixed;
-            inset: 0;
-            background: rgba(0,0,0,0.55);
-            z-index: 8000;
-            align-items: center;
-            justify-content: center;
-        }
-        #pendingApprovalModal.show { display: flex; }
-        .approval-card {
-            background: #fff;
-            border-radius: 18px;
-            padding: 36px 32px 28px;
-            max-width: 360px;
-            width: 90%;
-            text-align: center;
-            box-shadow: 0 8px 40px rgba(0,0,0,0.18);
-        }
-        .approval-icon {
-            font-size: 52px;
-            margin-bottom: 12px;
-        }
-        .approval-card h2 {
-            font-size: 20px;
-            font-weight: 700;
-            color: #1f2937;
-            margin-bottom: 10px;
-        }
-        .approval-card p {
-            font-size: 14px;
-            color: #6b7280;
-            line-height: 1.6;
-            margin-bottom: 24px;
-        }
-        .approval-card .btn-primary {
-            width: 100%;
-        }
-
-        /* ===== ADMIN PENDING USERS SECTION ===== */
-        .pending-users-section {
-            margin-top: 20px;
-            border-top: 1px solid #e5e7eb;
-            padding-top: 16px;
-        }
-        .pending-users-section h3 {
-            font-size: 14px;
-            font-weight: 700;
-            color: #374151;
-            margin-bottom: 10px;
-        }
-        #pendingUsersList {
-            max-height: 200px;
-            overflow-y: auto;
-        }
-        .pending-user-row {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 8px 10px;
-            border-radius: 8px;
-            background: #f9fafb;
-            margin-bottom: 6px;
-            border: 1px solid #e5e7eb;
-        }
-        .pending-user-info {
-            display: flex;
-            flex-direction: column;
-        }
-        .pending-user-name {
-            font-size: 13px;
-            font-weight: 600;
-            color: #1f2937;
-        }
-        .pending-user-email {
-            font-size: 11px;
-            color: #9ca3af;
-            margin-top: 1px;
-        }
-        .approve-btn {
-            background: #10b981;
-            color: #fff;
-            border: none;
-            border-radius: 6px;
-            padding: 5px 12px;
-            font-size: 12px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: background 0.2s;
-            white-space: nowrap;
-        }
-        .approve-btn:hover { background: #059669; }
-        .approve-btn:disabled {
-            background: #d1fae5;
-            color: #6ee7b7;
-            cursor: default;
-        }
-        .no-pending-msg {
-            font-size: 13px;
-            color: #9ca3af;
-            text-align: center;
-            padding: 12px 0;
-            font-style: italic;
-        }
-
         /* ===== PASSWORD CHANGE MODAL ===== */
         .modal-overlay {
             display: none;
@@ -1438,28 +1326,190 @@
             <button class="btn-secondary" id="cancelAdminSettingsBtn">Cancel</button>
             <button class="btn-primary" id="saveAdminSettingsBtn">Save</button>
         </div>
-
-        <!-- Pending user approvals section -->
-        <div class="pending-users-section">
-            <h3>👥 Pending User Approvals</h3>
-            <div id="pendingUsersList">
-                <p class="no-pending-msg">Loading...</p>
-            </div>
+    </div>
+</div>
+<!-- Pending Approval Modal -->
+<div id="pendingApprovalModal" class="modal-overlay">
+    <div class="modal-content">
+        <h2>⏳ Awaiting Approval</h2>
+        <p style="color:#555; font-size:14px; margin-bottom:20px; line-height:1.5;">
+            Your account has been verified but is pending admin approval.
+            You will be able to log in once an administrator approves your account.
+        </p>
+        <div class="modal-buttons">
+            <button class="btn-primary" id="pendingApprovalOkBtn">OK</button>
         </div>
     </div>
 </div>
 
-<!-- Pending Approval Modal -->
-<div id="pendingApprovalModal">
-    <div class="approval-card">
-        <div class="approval-icon">⏳</div>
-        <h2>Awaiting Admin Approval</h2>
-        <p>Your account has been created and your email verified.<br>
-           An admin will review and approve your account shortly.<br>
-           Once approved, you'll be able to log in.</p>
-        <button class="btn-primary" id="pendingApprovalOkBtn">OK, Got it</button>
-    </div>
+<!-- ==================== VIDEO CALL MODALS ==================== -->
+
+<!-- Outgoing Call Modal (Caller sees this) -->
+<div id="outgoingCallModal" style="display:none; position:fixed; inset:0; z-index:10000;
+     background:linear-gradient(160deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%);
+     flex-direction:column; align-items:center; justify-content:center; color:#fff;">
+  <div style="text-align:center; margin-bottom:40px;">
+    <div id="outgoingCallAvatar" style="width:90px;height:90px;border-radius:50%;
+         background:linear-gradient(135deg,#667eea,#764ba2); display:flex;
+         align-items:center; justify-content:center; font-size:32px; font-weight:700;
+         margin:0 auto 16px; box-shadow:0 0 0 6px rgba(102,126,234,0.25),0 0 0 12px rgba(102,126,234,0.1);
+         animation:callPulse 1.5s ease-in-out infinite;"></div>
+    <h2 id="outgoingCallName" style="font-size:22px;font-weight:600;margin:0 0 8px;"></h2>
+    <p style="color:#aab;font-size:15px;margin:0;">Calling…</p>
+  </div>
+  <button id="cancelOutgoingCallBtn"
+          style="width:64px;height:64px;border-radius:50%;background:#e53e3e;border:none;
+                 cursor:pointer;font-size:26px;display:flex;align-items:center;justify-content:center;
+                 box-shadow:0 4px 20px rgba(229,62,62,0.5);transition:transform .15s;">
+    📵
+  </button>
 </div>
+
+<!-- Incoming Call Modal (Callee sees this) -->
+<div id="incomingCallModal" style="display:none; position:fixed; inset:0; z-index:10000;
+     background:linear-gradient(160deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%);
+     flex-direction:column; align-items:center; justify-content:center; color:#fff;">
+  <div style="text-align:center; margin-bottom:48px;">
+    <div id="incomingCallAvatar" style="width:90px;height:90px;border-radius:50%;
+         background:linear-gradient(135deg,#667eea,#764ba2); display:flex;
+         align-items:center; justify-content:center; font-size:32px; font-weight:700;
+         margin:0 auto 16px; box-shadow:0 0 0 6px rgba(102,126,234,0.25),0 0 0 12px rgba(102,126,234,0.1);
+         animation:callPulse 1.5s ease-in-out infinite;"></div>
+    <h2 id="incomingCallName" style="font-size:22px;font-weight:600;margin:0 0 8px;"></h2>
+    <p style="color:#aab;font-size:15px;margin:0;">Incoming Video Call…</p>
+  </div>
+  <div style="display:flex;gap:48px;">
+    <div style="text-align:center;">
+      <button id="declineCallBtn"
+              style="width:64px;height:64px;border-radius:50%;background:#e53e3e;border:none;
+                     cursor:pointer;font-size:26px;display:flex;align-items:center;justify-content:center;
+                     box-shadow:0 4px 20px rgba(229,62,62,0.5);margin:0 auto 8px;">
+        📵
+      </button>
+      <span style="font-size:13px;color:#aab;">Decline</span>
+    </div>
+    <div style="text-align:center;">
+      <button id="acceptCallBtn"
+              style="width:64px;height:64px;border-radius:50%;background:#38a169;border:none;
+                     cursor:pointer;font-size:26px;display:flex;align-items:center;justify-content:center;
+                     box-shadow:0 4px 20px rgba(56,161,105,0.5);margin:0 auto 8px;">
+        📹
+      </button>
+      <span style="font-size:13px;color:#aab;">Accept</span>
+    </div>
+  </div>
+</div>
+
+<!-- Active Video Call Window -->
+<div id="activeCallModal" style="display:none; position:fixed; inset:0; z-index:10000;
+     background:#000; flex-direction:column;">
+  <!-- Remote video (full screen) -->
+  <video id="remoteVideo" autoplay playsinline
+         style="width:100%;height:100%;object-fit:cover;background:#111;"></video>
+
+  <!-- Local video (PiP corner) -->
+  <video id="localVideo" autoplay playsinline muted
+         style="position:absolute;top:16px;right:16px;width:100px;height:140px;
+                object-fit:cover;border-radius:12px;border:2px solid rgba(255,255,255,0.3);
+                background:#222;box-shadow:0 4px 20px rgba(0,0,0,0.5);z-index:1;"></video>
+
+  <!-- Call info overlay top -->
+  <div style="position:absolute;top:0;left:0;right:0;padding:20px 20px 0;
+              background:linear-gradient(to bottom,rgba(0,0,0,0.6),transparent);z-index:2;">
+    <div id="callStatusText" style="color:#fff;font-size:14px;text-align:center;margin-bottom:4px;opacity:.8;">Connecting…</div>
+    <div id="callTimer" style="color:#fff;font-size:22px;font-weight:600;text-align:center;display:none;">00:00</div>
+  </div>
+
+  <!-- Control bar bottom -->
+  <div style="position:absolute;bottom:0;left:0;right:0;padding:24px 0 40px;
+              background:linear-gradient(to top,rgba(0,0,0,0.7),transparent);
+              display:flex;justify-content:center;gap:24px;z-index:2;">
+    <!-- Mute mic -->
+    <div style="text-align:center;">
+      <button id="muteAudioBtn"
+              style="width:56px;height:56px;border-radius:50%;background:rgba(255,255,255,0.2);
+                     border:none;cursor:pointer;font-size:22px;color:#fff;backdrop-filter:blur(6px);">
+        🎙️
+      </button>
+      <div style="color:#ddd;font-size:11px;margin-top:4px;">Mute</div>
+    </div>
+    <!-- Toggle camera -->
+    <div style="text-align:center;">
+      <button id="toggleVideoBtn"
+              style="width:56px;height:56px;border-radius:50%;background:rgba(255,255,255,0.2);
+                     border:none;cursor:pointer;font-size:22px;color:#fff;backdrop-filter:blur(6px);">
+        📹
+      </button>
+      <div style="color:#ddd;font-size:11px;margin-top:4px;">Camera</div>
+    </div>
+    <!-- End call -->
+    <div style="text-align:center;">
+      <button id="endCallBtn"
+              style="width:56px;height:56px;border-radius:50%;background:#e53e3e;
+                     border:none;cursor:pointer;font-size:22px;
+                     box-shadow:0 4px 20px rgba(229,62,62,0.5);">
+        📵
+      </button>
+      <div style="color:#ddd;font-size:11px;margin-top:4px;">End</div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== LOCATION MAP MESSAGE CARD CSS ==================== -->
+<style>
+@keyframes callPulse {
+  0%,100% { box-shadow: 0 0 0 6px rgba(102,126,234,0.25), 0 0 0 12px rgba(102,126,234,0.1); }
+  50%      { box-shadow: 0 0 0 10px rgba(102,126,234,0.35), 0 0 0 20px rgba(102,126,234,0.15); }
+}
+.location-card {
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  overflow: hidden;
+  min-width: 220px;
+  max-width: 260px;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+  text-decoration: none;
+  color: inherit;
+}
+.location-map-placeholder {
+  width: 100%;
+  height: 80px;
+  background: linear-gradient(135deg,#c8e6c9,#66bb6a);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 2px;
+}
+.location-map-placeholder .loc-coords {
+  font-size: 10px;
+  color: #1b5e20;
+  font-weight: 500;
+  font-family: monospace;
+}
+.location-card-footer {
+  background: #fff;
+  padding: 6px 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #333;
+  border-top: 1px solid #e0e0e0;
+}
+.location-card-footer .loc-icon { font-size: 14px; }
+.location-time-row {
+  display: flex;
+  justify-content: flex-end;
+  padding: 2px 4px 0;
+}
+.sent .location-card { border: 1px solid #d4f5c0; }
+.received .location-card { border: 1px solid #e0e0e0; }
+</style>
+
 <!-- Image Lightbox (in-app, no new tab) -->
 <div id="imageLightbox" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.88);
      z-index:9999; flex-direction:column; align-items:center; justify-content:center; padding:16px;">
