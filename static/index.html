@@ -919,6 +919,59 @@
             color: #e5e7eb;
             font-weight: 500;
         }
+        /* ===== VIDEO CALL BUBBLE ===== */
+        .call-bubble-wrap {
+            display: flex;
+            margin: 6px 0;
+        }
+        .call-bubble-wrap.sent { justify-content: flex-end; }
+        .call-bubble-wrap.received { justify-content: flex-start; }
+
+        .call-bubble {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 14px 6px;
+            border-radius: 10px;
+            max-width: 75%;
+            min-width: 180px;
+        }
+        .call-bubble-wrap.sent .call-bubble {
+            background: var(--sent-bg);
+            color: white;
+            border-radius: 8px 8px 0 8px;
+            flex-direction: row-reverse;
+            text-align: right;
+        }
+        .call-bubble-wrap.received .call-bubble {
+            background: white;
+            color: var(--text-dark);
+            border-radius: 8px 8px 8px 0;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        }
+        .call-bubble-icon {
+            font-size: 20px;
+            flex-shrink: 0;
+        }
+        .call-bubble-info { flex: 1; min-width: 0; }
+        .call-bubble-label {
+            font-size: 14px;
+            font-weight: 600;
+            line-height: 1.3;
+        }
+        .call-bubble-wrap.sent .call-bubble-label { color: rgba(255,255,255,0.95); }
+        .call-bubble-wrap.received .call-bubble-label { color: #1a1a2e; }
+        .call-bubble-footer {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 4px;
+            font-size: 11px;
+            margin-top: 3px;
+        }
+        .call-bubble-wrap.sent .call-bubble-footer { color: rgba(255,255,255,0.75); }
+        .call-bubble-wrap.received .call-bubble-footer { color: #667; }
+
         /* ===== PASSWORD CHANGE MODAL ===== */
         .modal-overlay {
             display: none;

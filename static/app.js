@@ -1867,6 +1867,69 @@ function handleMessageKeydown(event) {
 
 // ==================== CHAT SETTINGS ====================
 
+// ==================== VIDEO CALL BUBBLE ====================
+// callStatus: 'initiated' | 'declined' | 'missed' | 'ended'
+// durationSecs: number (only for 'ended')
+function addCallBubbleToUI(peerUsername, type, callStatus, durationSecs) {
+    const messagesArea = document.getElementById('messagesArea');
+    if (!messagesArea) return;
+
+    const icons = { initiated: '📹', declined: '📵', missed: '📵', ended: '📹' };
+    const labels = {
+        initiated: `Video call`,
+        declined:  type === 'sent' ? `${peerUsername} declined` : `You declined`,
+        missed:    `Missed video call`,
+        ended:     `Video call`,
+    };
+    const icon = icons[callStatus] || '📹';
+    let label = labels[callStatus] || 'Video call';
+    let durationLabel = '';
+    if (callStatus === 'ended' && durationSecs > 0) {
+        const m = Math.floor(durationSecs / 60);
+        const s = durationSecs % 60;
+        durationLabel = m > 0
+            ? `${m}m ${String(s).padStart(2,'0')}s`
+            : `${s}s`;
+    }
+
+    const timestamp = Date.now();
+    const wrap = document.createElement('div');
+    wrap.className = `call-bubble-wrap ${type}`;
+
+    const bubble = document.createElement('div');
+    bubble.className = 'call-bubble';
+
+    const iconEl = document.createElement('span');
+    iconEl.className = 'call-bubble-icon';
+    iconEl.textContent = icon;
+
+    const info = document.createElement('div');
+    info.className = 'call-bubble-info';
+
+    const labelEl = document.createElement('div');
+    labelEl.className = 'call-bubble-label';
+    labelEl.textContent = label;
+    info.appendChild(labelEl);
+
+    if (durationLabel) {
+        const durEl = document.createElement('div');
+        durEl.style.cssText = 'font-size:11px; opacity:0.8; margin-top:1px;';
+        durEl.textContent = durationLabel;
+        info.appendChild(durEl);
+    }
+
+    const footer = document.createElement('div');
+    footer.className = 'call-bubble-footer';
+    footer.innerHTML = `<span>${formatTime(timestamp)}</span>`;
+    info.appendChild(footer);
+
+    bubble.appendChild(iconEl);
+    bubble.appendChild(info);
+    wrap.appendChild(bubble);
+    messagesArea.appendChild(wrap);
+    messagesArea.scrollTop = messagesArea.scrollHeight;
+}
+
 // ==================== VIDEO CALL ====================
 // WebRTC state
 let localStream = null;
@@ -1889,6 +1952,9 @@ function startVideoCall() {
     document.getElementById('outgoingCallAvatar').textContent = getInitials(callPeer);
     document.getElementById('outgoingCallName').textContent = callPeer;
     document.getElementById('outgoingCallModal').style.display = 'flex';
+
+    // Show "Video call" bubble in chat for the caller immediately
+    addCallBubbleToUI(callPeer, 'sent', 'initiated', 0);
 
     // Play ringtone on caller side
     playRingtone();
@@ -1939,6 +2005,8 @@ function declineCall() {
     sendSignal({ type: 'call_declined', to: callPeer, from: currentUser });
     closePeerConnection();
     document.getElementById('incomingCallModal').style.display = 'none';
+    // Show "You declined" bubble on recipient side
+    addCallBubbleToUI(callPeer, 'received', 'declined', 0);
     pendingOffer = null;
     callPeer = null;
 }
@@ -1999,8 +2067,12 @@ function showActiveCallUI() {
 }
 
 function endCall() {
-    sendSignal({ type: 'call_end', to: callPeer, from: currentUser });
+    const duration = callSeconds;
+    const peer = callPeer;
+    sendSignal({ type: 'call_end', to: peer, from: currentUser });
     closeCallUI();
+    // Show ended bubble with duration for the person who ended the call
+    if (peer) addCallBubbleToUI(peer, 'sent', 'ended', duration);
 }
 
 function closeCallUI() {
@@ -2061,6 +2133,8 @@ async function handleCallSignal(signal) {
             document.getElementById('incomingCallAvatar').textContent = getInitials(signal.from);
             document.getElementById('incomingCallName').textContent = signal.from;
             document.getElementById('incomingCallModal').style.display = 'flex';
+            // Show "Video call" bubble on recipient side
+            addCallBubbleToUI(signal.from, 'received', 'initiated', 0);
             playRingtone();
             break;
 
@@ -2081,21 +2155,29 @@ async function handleCallSignal(signal) {
             stopRingtone();
             document.getElementById('outgoingCallModal').style.display = 'none';
             closePeerConnection();
+            // Show "declined" bubble on caller side
+            addCallBubbleToUI(signal.from, 'sent', 'declined', 0);
             callPeer = null;
-            alert(`${signal.from} declined the call.`);
             break;
 
         case 'call_cancel':
             stopRingtone();
             document.getElementById('incomingCallModal').style.display = 'none';
             closePeerConnection();
+            // Show "missed" bubble on recipient side when caller cancels
+            addCallBubbleToUI(signal.from, 'received', 'missed', 0);
             callPeer = null;
             pendingOffer = null;
             break;
 
-        case 'call_end':
+        case 'call_end': {
+            const duration = callSeconds;
+            const peer = callPeer;
             closeCallUI();
+            // Show ended bubble with duration for the person who received the end signal
+            if (peer) addCallBubbleToUI(peer, 'received', 'ended', duration);
             break;
+        }
     }
 }
 
