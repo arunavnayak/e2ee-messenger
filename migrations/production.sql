@@ -1,141 +1,115 @@
 -- ============================================================
--- PRODUCTION MIGRATION (PostgreSQL) - Render.com
+-- PRODUCTION MIGRATION (PostgreSQL / Neon)
 -- ============================================================
--- This file runs AUTOMATICALLY on Render.com via preDeployCommand
--- You don't need to run this manually!
+-- This file is safe to run multiple times (idempotent)
+-- It creates all tables and indexes required by SQLAlchemy models
+-- ============================================================
 
--- Add read column to pending_messages table (if not exists)
-DO $$ 
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_name = 'pending_messages' AND column_name = 'read'
-    ) THEN
-        ALTER TABLE pending_messages ADD COLUMN read BOOLEAN DEFAULT FALSE NOT NULL;
-        RAISE NOTICE 'Added read column to pending_messages';
-    ELSE
-        RAISE NOTICE 'Column read already exists in pending_messages';
-    END IF;
-END $$;
 
--- Create user_preferences table (if not exists)
+-- ===================== TABLE: users =====================
+CREATE TABLE IF NOT EXISTS users (
+                                     id SERIAL PRIMARY KEY,
+                                     username VARCHAR(32) UNIQUE NOT NULL,
+    email VARCHAR(128) UNIQUE NOT NULL,
+    auth_hash VARCHAR(128) NOT NULL,
+    public_key TEXT NOT NULL,
+    is_verified BOOLEAN DEFAULT FALSE,
+    is_authorized BOOLEAN DEFAULT FALSE NOT NULL,
+    is_admin BOOLEAN DEFAULT FALSE NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+
+
+-- ===================== TABLE: encrypted_vaults =====================
+CREATE TABLE IF NOT EXISTS encrypted_vaults (
+                                                id SERIAL PRIMARY KEY,
+                                                username VARCHAR(32) UNIQUE NOT NULL,
+    encrypted_vault_blob TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ
+    );
+
+CREATE INDEX IF NOT EXISTS idx_encrypted_vaults_username ON encrypted_vaults(username);
+
+
+-- ===================== TABLE: pending_messages =====================
+CREATE TABLE IF NOT EXISTS pending_messages (
+                                                id SERIAL PRIMARY KEY,
+                                                from_username VARCHAR(32) NOT NULL,
+    to_username VARCHAR(32) NOT NULL,
+    encrypted_payload TEXT NOT NULL,
+    timestamp TIMESTAMPTZ DEFAULT NOW(),
+    read BOOLEAN DEFAULT FALSE NOT NULL
+    );
+
+CREATE INDEX IF NOT EXISTS idx_pending_to_username ON pending_messages(to_username);
+CREATE INDEX IF NOT EXISTS idx_pending_from_username ON pending_messages(from_username);
+
+
+-- ===================== TABLE: session_tokens =====================
+CREATE TABLE IF NOT EXISTS session_tokens (
+                                              id SERIAL PRIMARY KEY,
+                                              username VARCHAR(32) NOT NULL,
+    token_hash VARCHAR(128) UNIQUE NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL
+    );
+
+CREATE INDEX IF NOT EXISTS idx_token_hash_expires ON session_tokens(token_hash, expires_at);
+
+
+-- ===================== TABLE: user_preferences =====================
 CREATE TABLE IF NOT EXISTS user_preferences (
-    id SERIAL PRIMARY KEY,
-    username VARCHAR(32) NOT NULL,
+                                                id SERIAL PRIMARY KEY,
+                                                username VARCHAR(32) NOT NULL,
     blocked_users TEXT DEFAULT '[]' NOT NULL,
     muted_users TEXT DEFAULT '[]' NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE
-);
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ
+    );
 
--- Create index (if not exists)
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_indexes WHERE indexname = 'idx_user_preferences_username'
-    ) THEN
-        CREATE INDEX idx_user_preferences_username ON user_preferences(username);
-        RAISE NOTICE 'Created index idx_user_preferences_username';
-    ELSE
-        RAISE NOTICE 'Index idx_user_preferences_username already exists';
-    END IF;
-END $$;
-
--- Success message
-DO $$
-BEGIN
-    RAISE NOTICE '✅ Migration completed successfully!';
-END $$;
+CREATE INDEX IF NOT EXISTS idx_user_preferences_username ON user_preferences(username);
 
 
--- ===================== ALTER TABLE: users =====================
--- Add email column (nullable for existing users)
-ALTER TABLE users
-    ADD COLUMN IF NOT EXISTS email VARCHAR(128);
-
--- Ensure all existing rows have unique dummy emails (for SQLite fallback)
--- NOTE: You can later update these manually if needed.
-UPDATE users
-SET email = username || '@placeholder.local'
-WHERE email IS NULL;
-
--- Add a unique constraint (Postgres-safe)
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint WHERE conname = 'uq_users_email'
-    ) THEN
-ALTER TABLE users ADD CONSTRAINT uq_users_email UNIQUE (email);
-END IF;
-EXCEPTION WHEN others THEN
-    -- Ignore if running under SQLite (no pg_constraint table)
-    RAISE NOTICE 'Skipping UNIQUE constraint creation (likely SQLite)';
-END;
-$$;
-
--- Add is_verified column (default false)
-ALTER TABLE users
-    ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT FALSE;
-
--- ===============================================================
-
--- ===================== CREATE TABLE: user_verifications =====================
+-- ===================== TABLE: user_verifications =====================
 CREATE TABLE IF NOT EXISTS user_verifications (
-    id SERIAL PRIMARY KEY,
-    username VARCHAR(32) UNIQUE NOT NULL,
+                                                  id SERIAL PRIMARY KEY,
+                                                  username VARCHAR(32) UNIQUE NOT NULL,
     email VARCHAR(128) NOT NULL,
     otp_code VARCHAR(6) NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    expires_at TIMESTAMP WITH TIME ZONE NOT NULL
-                             );
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL
+    );
 
--- Add indexes for lookup performance
-CREATE INDEX IF NOT EXISTS idx_verifications_username
-    ON user_verifications (username);
 
-CREATE INDEX IF NOT EXISTS idx_verifications_email
-    ON user_verifications (email);
+-- ===================== TABLE: attachment_config =====================
+CREATE TABLE IF NOT EXISTS attachment_config (
+                                                 id SERIAL PRIMARY KEY,
+                                                 max_image_size_mb INTEGER DEFAULT 5 NOT NULL,
+                                                 max_file_size_mb INTEGER DEFAULT 10 NOT NULL,
+                                                 updated_by VARCHAR(32),
+    updated_at TIMESTAMPTZ
+    );
 
--- ===============================================================
+
+-- ===================== TABLE: message_reactions =====================
 CREATE TABLE IF NOT EXISTS message_reactions (
-    id SERIAL PRIMARY KEY,
-    message_id INTEGER NOT NULL REFERENCES pending_messages(id) ON DELETE CASCADE,
+                                                 id SERIAL PRIMARY KEY,
+                                                 message_id INTEGER NOT NULL REFERENCES pending_messages(id) ON DELETE CASCADE,
     username VARCHAR(32) NOT NULL,
     emoji VARCHAR(16) NOT NULL,
     created_at TIMESTAMPTZ DEFAULT NOW()
     );
 
-CREATE INDEX IF NOT EXISTS idx_reactions_message_id
-    ON message_reactions(message_id);
+CREATE INDEX IF NOT EXISTS idx_message_reactions_message_id ON message_reactions(message_id);
+CREATE INDEX IF NOT EXISTS idx_message_reactions_username ON message_reactions(username);
 
---
-CREATE TABLE attachment_config (
-    id SERIAL PRIMARY KEY,
-    max_image_size_mb INTEGER NOT NULL DEFAULT 5,
-    max_file_size_mb INTEGER NOT NULL DEFAULT 10,
-    updated_by VARCHAR(32),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
 
---
-CREATE OR REPLACE FUNCTION update_timestamp()
-RETURNS TRIGGER AS $$
+-- ===================== SUCCESS MESSAGE =====================
+DO $$
 BEGIN
-    NEW.updated_at = NOW();
-RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER update_attachment_config_timestamp
-    BEFORE UPDATE ON attachment_config
-    FOR EACH ROW
-    EXECUTE FUNCTION update_timestamp();
-
-
---
-ALTER TABLE users ADD COLUMN is_admin BOOLEAN DEFAULT FALSE;
-ALTER TABLE users ADD COLUMN is_authorized BOOLEAN DEFAULT FALSE;
-
-update users  set is_admin = true where id=1;
-update users  set is_authorized = true where id=1;
-
+    RAISE NOTICE '✅ Neon migration completed successfully!';
+END $$;

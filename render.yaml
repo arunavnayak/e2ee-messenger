@@ -15,15 +15,10 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.10
-      - key: DATABASE_URL
-        fromDatabase:
-          name: e2ee-db
-          property: connectionString
-    autoDeploy: true
 
-databases:
-  - name: e2ee-db
-    databaseName: e2ee_messenger
-    user: e2ee_messenger_user
-    plan: free
-    region: virginia
+        # This tells Render the value is managed in the Dashboard, not this file.
+        # 'sync: false' ensures Render won't overwrite your Dashboard value with a blank.
+      - key: DATABASE_URL
+        sync: false
+
+    autoDeploy: true
