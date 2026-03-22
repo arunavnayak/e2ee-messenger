@@ -2171,6 +2171,7 @@ async function handleCallSignal(signal) {
             break;
 
         case 'call_end': {
+            stopRingtone();
             const duration = callSeconds;
             const peer = callPeer;
             closeCallUI();
@@ -2858,6 +2859,7 @@ function createAttachmentElement({filename, mimeType, isImage, type, timestamp, 
         : filename;
     const iconSvg = getAttachmentIcon(mimeType, isImage);
 
+    // Build card using DOM methods only — no innerHTML with onclick (CSP-safe)
     let card;
 
     if (isImage && blobUrl) {
@@ -2879,6 +2881,7 @@ function createAttachmentElement({filename, mimeType, isImage, type, timestamp, 
 
         card.appendChild(img);
         card.appendChild(cardFoot);
+        // addEventListener — CSP-safe, no inline onclick
         card.addEventListener('click', () => openImageLightbox(blobUrl, filename));
 
     } else if (!isImage && blobUrl) {

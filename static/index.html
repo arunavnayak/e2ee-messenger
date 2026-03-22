@@ -972,6 +972,113 @@
         .call-bubble-wrap.sent .call-bubble-footer { color: rgba(255,255,255,0.75); }
         .call-bubble-wrap.received .call-bubble-footer { color: #667; }
 
+        /* ===== PENDING APPROVAL MODAL ===== */
+        #pendingApprovalModal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.55);
+            z-index: 8000;
+            align-items: center;
+            justify-content: center;
+        }
+        #pendingApprovalModal.show { display: flex; }
+        .approval-card {
+            background: #fff;
+            border-radius: 18px;
+            padding: 36px 32px 28px;
+            max-width: 360px;
+            width: 90%;
+            text-align: center;
+            box-shadow: 0 8px 40px rgba(0,0,0,0.18);
+        }
+        .approval-icon {
+            font-size: 52px;
+            margin-bottom: 12px;
+        }
+        .approval-card h2 {
+            font-size: 20px;
+            font-weight: 700;
+            color: #1f2937;
+            margin-bottom: 10px;
+        }
+        .approval-card p {
+            font-size: 14px;
+            color: #6b7280;
+            line-height: 1.6;
+            margin-bottom: 24px;
+        }
+        .approval-card .btn-primary {
+            width: 100%;
+        }
+
+        /* ===== ADMIN PENDING USERS SECTION ===== */
+        .pending-users-section {
+            margin-top: 20px;
+            border-top: 1px solid #e5e7eb;
+            padding-top: 16px;
+        }
+        .pending-users-section h3 {
+            font-size: 14px;
+            font-weight: 700;
+            color: #374151;
+            margin-bottom: 10px;
+        }
+        #pendingUsersList {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .pending-user-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 10px;
+            border-radius: 8px;
+            background: #f9fafb;
+            margin-bottom: 6px;
+            border: 1px solid #e5e7eb;
+        }
+        .pending-user-info {
+            display: flex;
+            flex-direction: column;
+        }
+        .pending-user-name {
+            font-size: 13px;
+            font-weight: 600;
+            color: #1f2937;
+        }
+        .pending-user-email {
+            font-size: 11px;
+            color: #9ca3af;
+            margin-top: 1px;
+        }
+        .approve-btn {
+            background: #10b981;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            padding: 5px 12px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+            white-space: nowrap;
+        }
+        .approve-btn:hover { background: #059669; }
+        .approve-btn:disabled {
+            background: #d1fae5;
+            color: #6ee7b7;
+            cursor: default;
+        }
+        .no-pending-msg {
+            font-size: 13px;
+            color: #9ca3af;
+            text-align: center;
+            padding: 12px 0;
+            font-style: italic;
+        }
+
+
         /* ===== PASSWORD CHANGE MODAL ===== */
         .modal-overlay {
             display: none;
@@ -1378,6 +1485,14 @@
         <div class="modal-buttons">
             <button class="btn-secondary" id="cancelAdminSettingsBtn">Cancel</button>
             <button class="btn-primary" id="saveAdminSettingsBtn">Save</button>
+        </div>
+
+        <!-- Pending user approvals section -->
+        <div class="pending-users-section">
+            <h3>👥 Pending User Approvals</h3>
+            <div id="pendingUsersList">
+                <p class="no-pending-msg">Loading...</p>
+            </div>
         </div>
     </div>
 </div>
