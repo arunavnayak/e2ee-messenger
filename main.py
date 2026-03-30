@@ -6,6 +6,12 @@ import re
 import base64
 from datetime import datetime, timedelta, UTC
 from typing import Dict
+import io
+import subprocess
+import tempfile
+import shutil
+from fastapi.responses import StreamingResponse
+from fastapi import UploadFile, File, Form
 
 import requests
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Request, status
@@ -1413,6 +1419,220 @@ async def approve_user(req: ApproveUserRequest, db: Session = Depends(get_db)):
     db.commit()
 
     return {"status": "success", "message": f"User '{req.target_username}' approved"}
+
+# ==================== DB BACKUP & RESTORE ====================
+
+# ---------------------------------------------------------------------------
+# Helper: verify the requesting user is an authenticated admin
+# ---------------------------------------------------------------------------
+def _require_admin(username: str, auth_hash: str, db) -> "User":
+    user = db.query(User).filter(User.username == username).first()
+    if not user or not user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    if not constant_time_compare(user.auth_hash, auth_hash):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    return user
+
+
+# ---------------------------------------------------------------------------
+# Helper: is the current DB engine PostgreSQL?
+# ---------------------------------------------------------------------------
+def _is_postgres() -> bool:
+    from database import DATABASE_URL  # imported in main.py already via `from database import ...`
+    return DATABASE_URL.startswith("postgresql")
+
+
+# ===========================================================================
+#  POST /api/admin/db/dump
+#  Body (JSON): { "username": "...", "auth_hash": "..." }
+#  Response: application/gzip octet-stream (the raw dump bytes)
+# ===========================================================================
+class DbDumpRequest(BaseModel):
+    username: str
+    auth_hash: str
+
+
+@app.post("/api/admin/db/dump")
+async def admin_db_dump(req: DbDumpRequest, db: Session = Depends(get_db)):
+    """
+    Generate a database dump and stream it back to the admin.
+
+    • PostgreSQL (production / Render): runs pg_dump → gzip → stream
+    • SQLite  (local dev):              copies the .db file → gzip → stream
+
+    The dump bytes are NEVER written to a persistent file on the server;
+    everything lives in memory / a tmp dir that is cleaned up immediately.
+    The caller (frontend) encrypts the downloaded bytes with AES-GCM before
+    saving to disk, so the file at rest is always password-protected.
+    """
+    _require_admin(req.username, req.auth_hash, db)
+
+    timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+
+    if _is_postgres():
+        # ── PostgreSQL dump ──────────────────────────────────────────────
+        from database import DATABASE_URL as DB_URL
+
+        try:
+            result = subprocess.run(
+                ["pg_dump", "--no-password", DB_URL],
+                capture_output=True,
+                timeout=120,
+            )
+        except FileNotFoundError:
+            raise HTTPException(
+                status_code=500,
+                detail="pg_dump not found on server. Install postgresql-client."
+            )
+        except subprocess.TimeoutExpired:
+            raise HTTPException(status_code=500, detail="pg_dump timed out (>120 s)")
+
+        if result.returncode != 0:
+            err = result.stderr.decode(errors="replace")
+            raise HTTPException(
+                status_code=500,
+                detail=f"pg_dump failed: {err[:300]}"
+            )
+
+        raw_sql = result.stdout          # bytes
+        buf = io.BytesIO()
+        import gzip
+        with gzip.GzipFile(fileobj=buf, mode="wb") as gz:
+            gz.write(raw_sql)
+        buf.seek(0)
+        filename = f"securechat_pg_dump_{timestamp}.sql.gz"
+
+    else:
+        # ── SQLite dump ──────────────────────────────────────────────────
+        import gzip
+        from database import DATABASE_URL as DB_URL
+
+        # Derive the file path from the SQLite URL  (sqlite:///./foo.db → ./foo.db)
+        db_path = DB_URL.replace("sqlite:///", "")
+
+        if not os.path.exists(db_path):
+            raise HTTPException(status_code=500, detail=f"SQLite file not found: {db_path}")
+
+        with open(db_path, "rb") as f:
+            raw_bytes = f.read()
+
+        buf = io.BytesIO()
+        with gzip.GzipFile(fileobj=buf, mode="wb") as gz:
+            gz.write(raw_bytes)
+        buf.seek(0)
+        filename = f"securechat_sqlite_dump_{timestamp}.db.gz"
+
+    return StreamingResponse(
+        buf,
+        media_type="application/gzip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-Dump-Filename": filename,
+        },
+    )
+
+
+# ===========================================================================
+#  POST /api/admin/db/restore
+#  Form fields:
+#    username  – admin username
+#    auth_hash – PBKDF2 auth hash (same as login)
+#    file      – the dump file (gzip-compressed SQL or SQLite .db)
+# ===========================================================================
+@app.post("/api/admin/db/restore")
+async def admin_db_restore(
+        username: str = Form(...),
+        auth_hash: str = Form(...),
+        file: UploadFile = File(...),
+        db: Session = Depends(get_db),
+):
+    """
+    Restore the database from an uploaded dump.
+
+    • PostgreSQL: decompress → pipe SQL into psql
+    • SQLite:     decompress → replace the .db file
+
+    The uploaded bytes are the RAW dump (already decrypted by the frontend
+    before uploading).  The server never sees the admin's encryption password.
+    """
+    _require_admin(username, auth_hash, db)
+
+    import gzip
+
+    # Read entire upload into memory (dumps should be < a few hundred MB)
+    compressed_bytes = await file.read()
+
+    # Decompress
+    try:
+        raw_bytes = gzip.decompress(compressed_bytes)
+    except Exception:
+        raise HTTPException(status_code=400, detail="File is not valid gzip. Was it encrypted before upload?")
+
+    steps_log = []   # collect step results to return to the client
+
+    if _is_postgres():
+        from database import DATABASE_URL as DB_URL
+
+        # Write decompressed SQL to a temp file then pipe into psql
+        tmp = tempfile.NamedTemporaryFile(suffix=".sql", delete=False)
+        try:
+            tmp.write(raw_bytes)
+            tmp.flush()
+            tmp.close()
+
+            steps_log.append({"step": "decompress", "status": "ok",
+                              "detail": f"Decompressed {len(raw_bytes):,} bytes of SQL"})
+
+            result = subprocess.run(
+                ["psql", "--no-password", DB_URL, "-f", tmp.name],
+                capture_output=True,
+                timeout=300,
+            )
+            stdout = result.stdout.decode(errors="replace")
+            stderr = result.stderr.decode(errors="replace")
+
+            if result.returncode != 0:
+                steps_log.append({"step": "psql", "status": "error", "detail": stderr[:400]})
+                return {"status": "error", "steps": steps_log}
+
+            steps_log.append({"step": "psql", "status": "ok",
+                              "detail": stdout[:400] or "psql completed with no output"})
+        finally:
+            os.unlink(tmp.name)
+
+    else:
+        from database import DATABASE_URL as DB_URL
+
+        db_path = DB_URL.replace("sqlite:///", "")
+        backup_path = db_path + ".pre_restore_backup"
+
+        steps_log.append({"step": "decompress", "status": "ok",
+                          "detail": f"Decompressed {len(raw_bytes):,} bytes"})
+
+        # Back up current DB
+        try:
+            shutil.copy2(db_path, backup_path)
+            steps_log.append({"step": "backup_current", "status": "ok",
+                              "detail": f"Backed up current DB to {backup_path}"})
+        except Exception as e:
+            steps_log.append({"step": "backup_current", "status": "warning",
+                              "detail": f"Could not back up: {e}"})
+
+        # Write restored DB
+        try:
+            with open(db_path, "wb") as f:
+                f.write(raw_bytes)
+            steps_log.append({"step": "write_db", "status": "ok",
+                              "detail": f"Wrote {len(raw_bytes):,} bytes to {db_path}"})
+        except Exception as e:
+            steps_log.append({"step": "write_db", "status": "error", "detail": str(e)})
+            return {"status": "error", "steps": steps_log}
+
+    steps_log.append({"step": "complete", "status": "ok",
+                      "detail": "Restore finished. Restart the server for changes to take full effect."})
+
+    return {"status": "success", "steps": steps_log}
+
 
 
 # ==================== STATIC FILES ====================

@@ -1078,6 +1078,90 @@
             font-style: italic;
         }
 
+        /* ===== DB BACKUP / RESTORE MODAL ===== */
+        #dbBackupModal .modal-content {
+            max-width: 480px;
+        }
+        .db-section {
+            margin-top: 18px;
+            border-top: 1px solid #e5e7eb;
+            padding-top: 14px;
+        }
+        .db-section h3 {
+            font-size: 13px;
+            font-weight: 700;
+            color: #374151;
+            margin-bottom: 10px;
+        }
+        .db-password-row {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .db-password-row input {
+            flex: 1;
+        }
+        .db-action-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            padding: 9px 16px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: opacity .2s;
+        }
+        .db-action-btn:disabled { opacity: .55; cursor: default; }
+        .db-action-btn.danger {
+            background: linear-gradient(135deg, #e53e3e 0%, #9b2335 100%);
+        }
+        .db-log {
+            background: #0f172a;
+            color: #86efac;
+            font-family: 'Courier New', monospace;
+            font-size: 11.5px;
+            border-radius: 8px;
+            padding: 10px 12px;
+            max-height: 180px;
+            overflow-y: auto;
+            margin-top: 10px;
+            display: none;
+            line-height: 1.6;
+        }
+        .db-log.visible { display: block; }
+        .db-log .log-ok   { color: #86efac; }
+        .db-log .log-warn { color: #fde047; }
+        .db-log .log-err  { color: #fca5a5; }
+        .db-log .log-info { color: #7dd3fc; }
+        .db-upload-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: #f3f4f6;
+            border: 1.5px dashed #d1d5db;
+            border-radius: 8px;
+            padding: 10px 14px;
+            cursor: pointer;
+            font-size: 13px;
+            color: #6b7280;
+            transition: border-color .2s;
+            margin-bottom: 8px;
+        }
+        .db-upload-label:hover { border-color: #667eea; color: #667eea; }
+        .db-upload-label input[type="file"] { display: none; }
+        #dbRestoreFilename {
+            font-size: 12px;
+            color: #374151;
+            font-weight: 600;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 240px;
+        }
+
 
         /* ===== PASSWORD CHANGE MODAL ===== */
         .modal-overlay {
@@ -1313,6 +1397,7 @@
             <div class="settings-item" id="settingsMenuBtn">Settings</div>
             <div class="settings-item" id="changePasswordMenuBtn">Change Password</div>
             <div class="settings-item" id="adminMenuBtn" style="display:none;">Admin Settings</div>
+            <div class="settings-item" id="dbBackupMenuBtn" style="display:none;">DB Backup &amp; Restore</div>
             <div class="settings-item" id="logoutMenuBtn">Logout</div>
         </div>
 
@@ -1496,6 +1581,51 @@
         </div>
     </div>
 </div>
+
+<!-- DB Backup / Restore Modal -->
+<div id="dbBackupModal" class="modal-overlay">
+    <div class="modal-content" style="max-width:480px;">
+        <h2>🗄️ Database Backup &amp; Restore</h2>
+        <p style="color:#666;font-size:13px;margin-bottom:4px;">
+            All operations require your admin password to authorise.
+            The dump is AES-256 encrypted in your browser before it ever leaves — the
+            server never sees your backup password.
+        </p>
+
+        <!-- ── DOWNLOAD / DUMP ── -->
+        <div class="db-section">
+            <h3>⬇ Download Database Dump</h3>
+            <div class="db-password-row">
+                <input type="password" id="dbDumpPassword"
+                       placeholder="Backup encryption password (≥8 chars)" autocomplete="new-password">
+                <button class="db-action-btn" id="dbDumpBtn">Download</button>
+            </div>
+            <div id="dbDumpLog" class="db-log"></div>
+        </div>
+
+        <!-- ── UPLOAD / RESTORE ── -->
+        <div class="db-section">
+            <h3>⬆ Restore from Dump</h3>
+            <label class="db-upload-label">
+                <span>📂</span>
+                <span id="dbRestoreFilename">Choose encrypted dump file…</span>
+                <input type="file" id="dbRestoreFile" accept=".enc">
+            </label>
+            <div class="db-password-row">
+                <input type="password" id="dbRestorePassword"
+                       placeholder="Backup encryption password" autocomplete="new-password">
+                <button class="db-action-btn danger" id="dbRestoreBtn" disabled>Restore</button>
+            </div>
+            <div id="dbRestoreLog" class="db-log"></div>
+        </div>
+
+        <div class="modal-buttons" style="margin-top:22px;">
+            <button class="btn-secondary" id="closeDbBackupModalBtn">Close</button>
+        </div>
+    </div>
+</div>
+
+
 <!-- Pending Approval Modal -->
 <div id="pendingApprovalModal" class="modal-overlay">
     <div class="modal-content">

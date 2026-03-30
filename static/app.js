@@ -381,6 +381,9 @@ async function handleLogin() {
 
         const authHash = await CryptoManager.deriveAuthHash(username, password);
 
+        // Store for admin operations (DB dump auth)
+        sessionStorage.setItem('authHash', authHash);
+
         const response = await fetch("/api/login", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -424,6 +427,9 @@ async function handleLogin() {
                 // Show Admin Settings menu item for admin users
                 const adminMenuBtn = document.getElementById('adminMenuBtn');
                 if (adminMenuBtn) adminMenuBtn.style.display = isAdmin ? 'block' : 'none';
+
+                const dbBackupMenuBtn = document.getElementById('dbBackupMenuBtn');
+                if (dbBackupMenuBtn) dbBackupMenuBtn.style.display = isAdmin ? 'block' : 'none';
 
                 // Store unread counts from server
                 unreadCounts = data.unread_counts || {};
@@ -503,6 +509,9 @@ async function restoreSessionFromServer(username, token, password) {
         // Show Admin Settings menu item for admin users
         const adminMenuBtn = document.getElementById('adminMenuBtn');
         if (adminMenuBtn) adminMenuBtn.style.display = isAdmin ? 'block' : 'none';
+
+        const dbBackupMenuBtn = document.getElementById('dbBackupMenuBtn');
+        if (dbBackupMenuBtn) dbBackupMenuBtn.style.display = isAdmin ? 'block' : 'none';
 
         unreadCounts = data.unread_counts || {};
         blockedUsers = data.blocked_users || [];
@@ -2825,6 +2834,277 @@ async function handleSaveAdminSettings() {
     }
 }
 
+// ============================================================
+//  DB BACKUP / RESTORE
+// ============================================================
+
+// ── Crypto helpers for backup encryption ────────────────────
+async function deriveBackupKey(password, salt) {
+    const material = await crypto.subtle.importKey(
+        "raw",
+        new TextEncoder().encode(password),
+        "PBKDF2",
+        false,
+        ["deriveKey"]
+    );
+    return crypto.subtle.deriveKey(
+        { name: "PBKDF2", salt, iterations: 200000, hash: "SHA-256" },
+        material,
+        { name: "AES-GCM", length: 256 },
+        false,
+        ["encrypt", "decrypt"]
+    );
+}
+
+async function encryptDump(dumpBytes, password) {
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const iv   = crypto.getRandomValues(new Uint8Array(12));
+    const key  = await deriveBackupKey(password, salt);
+    const ct   = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, dumpBytes);
+
+    // Layout: [4-byte magic] [16-byte salt] [12-byte iv] [ciphertext]
+    const magic = new Uint8Array([0x53, 0x43, 0x44, 0x42]); // "SCDB"
+    const out = new Uint8Array(4 + 16 + 12 + ct.byteLength);
+    out.set(magic, 0);
+    out.set(salt,  4);
+    out.set(iv,   20);
+    out.set(new Uint8Array(ct), 32);
+    return out.buffer;
+}
+
+async function decryptDump(encBytes, password) {
+    const buf    = new Uint8Array(encBytes);
+    const magic  = buf.slice(0, 4);
+    if (String.fromCharCode(...magic) !== "SCDB") {
+        throw new Error("Not a valid SecureChat backup file (bad magic bytes).");
+    }
+    const salt = buf.slice(4,  20);
+    const iv   = buf.slice(20, 32);
+    const ct   = buf.slice(32);
+    const key  = await deriveBackupKey(password, salt);
+    try {
+        return await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ct);
+    } catch {
+        throw new Error("Decryption failed — wrong backup password?");
+    }
+}
+
+// ── Log helper ───────────────────────────────────────────────
+function dbLog(logEl, message, type = "info") {
+    logEl.classList.add("visible");
+    const line = document.createElement("div");
+    line.className = `log-${type}`;
+    const ts = new Date().toLocaleTimeString();
+    line.textContent = `[${ts}] ${message}`;
+    logEl.appendChild(line);
+    logEl.scrollTop = logEl.scrollHeight;
+}
+
+function dbLogClear(logEl) {
+    logEl.innerHTML = "";
+    logEl.classList.remove("visible");
+}
+
+// ── Show / hide ──────────────────────────────────────────────
+function showDbBackupModal() {
+    dbLogClear(document.getElementById("dbDumpLog"));
+    dbLogClear(document.getElementById("dbRestoreLog"));
+    document.getElementById("dbDumpPassword").value    = "";
+    document.getElementById("dbRestorePassword").value = "";
+    document.getElementById("dbRestoreFile").value     = "";
+    document.getElementById("dbRestoreFilename").textContent = "Choose encrypted dump file…";
+    document.getElementById("dbRestoreBtn").disabled   = true;
+    document.getElementById("dbBackupModal").classList.add("show");
+}
+
+function hideDbBackupModal() {
+    document.getElementById("dbBackupModal").classList.remove("show");
+}
+
+// ── DOWNLOAD DUMP ────────────────────────────────────────────
+async function handleDbDump() {
+    const password = document.getElementById("dbDumpPassword").value.trim();
+    const logEl    = document.getElementById("dbDumpLog");
+    const btn      = document.getElementById("dbDumpBtn");
+
+    dbLogClear(logEl);
+
+    if (password.length < 8) {
+        dbLog(logEl, "Backup encryption password must be at least 8 characters.", "err");
+        return;
+    }
+
+    // Re-derive auth hash so the server can verify admin identity
+    let authHash;
+    try {
+        // Pull encrypted vault from sessionStorage (set during login)
+        const storedAuthHash = sessionStorage.getItem("authHash");
+        if (!storedAuthHash) throw new Error("Auth hash not in session — please log out and back in.");
+        authHash = storedAuthHash;
+    } catch (e) {
+        dbLog(logEl, "Could not retrieve auth credentials: " + e.message, "err");
+        return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = "Requesting…";
+
+    try {
+        dbLog(logEl, "Sending dump request to server…", "info");
+
+        const res = await fetch("/api/admin/db/dump", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ username: currentUser, auth_hash: authHash }),
+        });
+
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({ detail: res.statusText }));
+            dbLog(logEl, "Server error: " + (err.detail || res.statusText), "err");
+            return;
+        }
+
+        dbLog(logEl, "Received compressed dump from server.", "ok");
+
+        const dumpFilename = res.headers.get("X-Dump-Filename") || "dump.gz";
+        const dumpBytes    = await res.arrayBuffer();
+        dbLog(logEl, `Dump size: ${(dumpBytes.byteLength / 1024).toFixed(1)} KB`, "info");
+
+        dbLog(logEl, "Encrypting dump with AES-256-GCM in browser…", "info");
+        const encryptedBuf = await encryptDump(dumpBytes, password);
+        dbLog(logEl, `Encrypted size: ${(encryptedBuf.byteLength / 1024).toFixed(1)} KB`, "ok");
+
+        // Trigger browser download
+        const encFilename = dumpFilename + ".enc";
+        const blob = new Blob([encryptedBuf], { type: "application/octet-stream" });
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement("a");
+        a.href = url; a.download = encFilename;
+        document.body.appendChild(a); a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        dbLog(logEl, `✓ Encrypted dump saved as: ${encFilename}`, "ok");
+        dbLog(logEl, "Keep this file and your backup password in a safe place.", "warn");
+
+    } catch (e) {
+        dbLog(logEl, "Unexpected error: " + e.message, "err");
+    } finally {
+        btn.disabled = false;
+        btn.textContent = "Download";
+    }
+}
+
+// ── RESTORE DUMP ─────────────────────────────────────────────
+async function handleDbRestore() {
+    const fileInput = document.getElementById("dbRestoreFile");
+    const password  = document.getElementById("dbRestorePassword").value.trim();
+    const logEl     = document.getElementById("dbRestoreLog");
+    const btn       = document.getElementById("dbRestoreBtn");
+
+    dbLogClear(logEl);
+
+    if (!fileInput.files || !fileInput.files[0]) {
+        dbLog(logEl, "No file selected.", "err"); return;
+    }
+    if (password.length < 8) {
+        dbLog(logEl, "Backup encryption password must be at least 8 characters.", "err"); return;
+    }
+
+    const confirmed = confirm(
+        "⚠️ WARNING: Restoring will OVERWRITE the current database.\n\n" +
+        "Make sure you have a recent backup of the current state before proceeding.\n\n" +
+        "Type OK to continue."
+    );
+    if (!confirmed) return;
+
+    let authHash;
+    try {
+        authHash = sessionStorage.getItem("authHash");
+        if (!authHash) throw new Error("Auth hash not in session — please log out and back in.");
+    } catch (e) {
+        dbLog(logEl, "Could not retrieve auth credentials: " + e.message, "err");
+        return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = "Restoring…";
+
+    try {
+        dbLog(logEl, "Reading encrypted backup file…", "info");
+        const encBytes = await fileInput.files[0].arrayBuffer();
+        dbLog(logEl, `File size: ${(encBytes.byteLength / 1024).toFixed(1)} KB`, "info");
+
+        dbLog(logEl, "Decrypting backup in browser…", "info");
+        let dumpBytes;
+        try {
+            dumpBytes = await decryptDump(encBytes, password);
+        } catch (e) {
+            dbLog(logEl, e.message, "err");
+            return;
+        }
+        dbLog(logEl, `Decrypted dump: ${(dumpBytes.byteLength / 1024).toFixed(1)} KB`, "ok");
+
+        dbLog(logEl, "Uploading decrypted dump to server for restore…", "info");
+
+        const formData = new FormData();
+        formData.append("username",  currentUser);
+        formData.append("auth_hash", authHash);
+        formData.append("file",      new Blob([dumpBytes], { type: "application/gzip" }), "restore.gz");
+
+        const res = await fetch("/api/admin/db/restore", {
+            method: "POST",
+            body: formData,
+        });
+
+        const data = await res.json().catch(() => null);
+
+        if (!res.ok) {
+            dbLog(logEl, "Server rejected request: " + (data?.detail || res.statusText), "err");
+            return;
+        }
+
+        // Display server-side step log
+        if (data && data.steps) {
+            for (const step of data.steps) {
+                const type = step.status === "ok" ? "ok" : step.status === "warning" ? "warn" : "err";
+                dbLog(logEl, `[${step.step}] ${step.detail}`, type);
+            }
+        }
+
+        if (data && data.status === "success") {
+            dbLog(logEl, "✓ Restore complete. Reload the page / restart the server.", "ok");
+        } else {
+            dbLog(logEl, "Restore reported an error. Check log above.", "err");
+        }
+
+    } catch (e) {
+        dbLog(logEl, "Unexpected error: " + e.message, "err");
+    } finally {
+        btn.disabled = false;
+        btn.textContent = "Restore";
+    }
+}
+
+// ── File picker feedback ─────────────────────────────────────
+function initDbBackupFileInput() {
+    const input = document.getElementById("dbRestoreFile");
+    if (!input) return;
+    input.addEventListener("change", () => {
+        const file = input.files && input.files[0];
+        const label = document.getElementById("dbRestoreFilename");
+        const btn   = document.getElementById("dbRestoreBtn");
+        if (file) {
+            label.textContent = file.name;
+            btn.disabled = false;
+        } else {
+            label.textContent = "Choose encrypted dump file…";
+            btn.disabled = true;
+        }
+    });
+}
+
+
 // ==================== ATTACHMENT MESSAGE UI ====================
 function addAttachmentMessageToUI(filename, mimeType, isImage, type, timestamp, messageId, status, blobUrl) {
     const messagesArea = document.getElementById('messagesArea');
@@ -3125,6 +3405,20 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('attachLocation').addEventListener('click', attachLocation);
     // Send button
     document.getElementById('sendBtn').addEventListener('click', sendMessage);
+
+   // DB Backup menu item
+    document.getElementById('dbBackupMenuBtn').addEventListener('click', () => {
+       document.getElementById('settingsMenu').classList.remove('show');
+       showDbBackupModal();
+    });
+
+    document.getElementById('closeDbBackupModalBtn').addEventListener('click', hideDbBackupModal);
+    document.getElementById('dbBackupModal').addEventListener('click', (e) => {
+        if (e.target.id === 'dbBackupModal') hideDbBackupModal();
+    });
+    document.getElementById('dbDumpBtn').addEventListener('click', handleDbDump);
+    document.getElementById('dbRestoreBtn').addEventListener('click', handleDbRestore);
+    initDbBackupFileInput();
 
     // Message input
     const messageInput = document.getElementById('messageInput');
