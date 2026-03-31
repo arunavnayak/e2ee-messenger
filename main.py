@@ -830,6 +830,94 @@ class MarkReadRequest(BaseModel):
     to_username: str
 
 
+# ==================== PAGINATED CHAT HISTORY ====================
+
+@app.get("/api/chat/history/{username}/{contact}/paged")
+async def get_chat_history_paged(
+    username: str,
+    contact: str,
+    limit: int = 10,
+    before_id: int = None,
+    before_date: str = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Paginated chat history. Returns up to `limit` messages.
+    - before_id: return messages with id < before_id (load older batch)
+    - before_date: return messages with timestamp < before_date ISO string
+    Both filters can be combined; before_date takes precedence when supplied.
+    """
+    base_filter = or_(
+        (PendingMessage.from_username == username) & (PendingMessage.to_username == contact),
+        (PendingMessage.from_username == contact) & (PendingMessage.to_username == username)
+    )
+
+    query = db.query(PendingMessage).filter(base_filter)
+
+    if before_date:
+        try:
+            cutoff_dt = datetime.fromisoformat(before_date.replace("Z", "+00:00"))
+            query = query.filter(PendingMessage.timestamp < cutoff_dt)
+        except ValueError:
+            pass  # ignore malformed date; return latest batch
+
+    if before_id is not None:
+        query = query.filter(PendingMessage.id < before_id)
+
+    # Order descending to get the LAST `limit` messages, then reverse for display
+    messages = query.order_by(PendingMessage.timestamp.desc()).limit(limit).all()
+    messages = list(reversed(messages))
+
+    # Count total messages to let client know if more exist
+    total_count = db.query(PendingMessage).filter(base_filter).count()
+    oldest_id = messages[0].id if messages else None
+
+    # Check whether there are older messages beyond this page
+    has_more = False
+    if oldest_id is not None:
+        has_more = db.query(PendingMessage).filter(
+            base_filter,
+            PendingMessage.id < oldest_id
+        ).count() > 0
+
+    # Fetch reactions
+    message_ids = [m.id for m in messages]
+    reactions = db.query(MessageReaction).filter(
+        MessageReaction.message_id.in_(message_ids)
+    ).all() if message_ids else []
+
+    reactions_by_msg = {}
+    for r in reactions:
+        reactions_by_msg.setdefault(r.message_id, []).append({
+            "username": r.username,
+            "emoji": r.emoji,
+            "timestamp": r.created_at.isoformat(timespec="milliseconds"),
+        })
+
+    chat_history = []
+    for msg in messages:
+        chat_history.append({
+            "id": msg.id,
+            "from": msg.from_username,
+            "to": msg.to_username,
+            "payload": msg.encrypted_payload,
+            "timestamp": msg.timestamp.isoformat(timespec="milliseconds"),
+            "read": msg.read,
+            "is_sent": msg.from_username == username,
+            "reactions": reactions_by_msg.get(msg.id, []),
+        })
+
+    return {
+        "status": "success",
+        "messages": chat_history,
+        "has_more": has_more,
+        "total_count": total_count,
+        "oldest_id": oldest_id,
+    }
+
+
+
+
 @app.post("/api/messages/mark-read")
 async def mark_messages_read(req: MarkReadRequest, db: Session = Depends(get_db)):
     """Mark messages from a specific user as read"""

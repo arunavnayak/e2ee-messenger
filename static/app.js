@@ -23,6 +23,13 @@ let blockedUsers = [];
 let mutedUsers = [];
 let typingTimeout = null;
 
+// ==================== PAGINATION STATE ====================
+let chatPagination = {
+    hasMore: false,        // whether older messages exist
+    oldestId: null,        // DB id of oldest currently loaded message
+    loading: false,        // guard against concurrent fetches
+};
+
 // ==================== SESSION RESTORE CRYPTO HELPERS (ADDED) ====================
 
 // Convert base64 <-> ArrayBuffer
@@ -1000,9 +1007,14 @@ async function openChat(username) {
     // because the server will return ALL messages including these pending ones
     delete pendingMessagesStore[username];
 
-    // Fetch complete chat history from server
+    // Reset pagination state for this chat
+    chatPagination.hasMore = false;
+    chatPagination.oldestId = null;
+    chatPagination.loading = false;
+
+    // Fetch the LAST 10 messages from server (paginated)
     try {
-        const response = await fetch(`/api/chat/history/${currentUser}/${username}`);
+        const response = await fetch(`/api/chat/history/${currentUser}/${username}/paged?limit=10`);
         if (response.ok) {
             const data = await response.json();
 
@@ -1099,10 +1111,17 @@ async function openChat(username) {
                     });
                 }
             }
+
+            // Store pagination metadata
+            chatPagination.hasMore = data.has_more || false;
+            chatPagination.oldestId = data.oldest_id || null;
         }
     } catch (error) {
         console.error('Error fetching chat history:', error);
     }
+
+    // Show or hide the load-more banner
+    updateLoadMoreBanner();
 
     // Now render all messages
     const history = chatHistory[username] || [];
@@ -1872,6 +1891,224 @@ function handleMessageKeydown(event) {
         event.preventDefault();
         sendMessage();
     }
+}
+
+// ==================== PAGINATED MESSAGE LOADING ====================
+
+function updateLoadMoreBanner() {
+    const banner = document.getElementById('loadMoreBanner');
+    if (!banner) return;
+    banner.style.display = chatPagination.hasMore ? 'flex' : 'none';
+}
+
+// Processes an array of raw server message objects into chatHistory and renders
+// them at the TOP of the messages area (prepend), preserving scroll position.
+async function prependMessages(rawMessages, username) {
+    if (!rawMessages || rawMessages.length === 0) return;
+
+    const messagesArea = document.getElementById('messagesArea');
+
+    // Snapshot scroll height before prepending so we can restore position
+    const scrollHeightBefore = messagesArea.scrollHeight;
+    const scrollTopBefore = messagesArea.scrollTop;
+
+    // Process raw server messages into structured objects (same logic as openChat)
+    const newItems = [];
+    for (const msg of rawMessages) {
+        const serverTimestamp = new Date(msg.timestamp).getTime();
+        let payload;
+        try { payload = JSON.parse(msg.payload); } catch(e) { continue; }
+
+        try {
+            if (payload.type === 'location_message') {
+                const senderPub = msg.is_sent
+                    ? contacts.find(c => c.username === username)?.public_key
+                    : payload.sender_public_key;
+                if (senderPub) {
+                    const decrypted = await CryptoManager.decryptMessage(
+                        payload.ciphertext, payload.nonce, senderPub, userKeys.privateKey
+                    );
+                    const locData = JSON.parse(decrypted);
+                    newItems.push({
+                        text: '📍 Location',
+                        type: msg.is_sent ? 'sent' : 'received',
+                        timestamp: serverTimestamp,
+                        messageId: msg.id,
+                        status: msg.is_sent ? 'delivered' : null,
+                        isLocation: true,
+                        locationMeta: { lat: locData.lat, lng: locData.lng },
+                    });
+                }
+                continue;
+            }
+
+            if (payload.type === 'attachment') {
+                const isImage = payload.category === 'image';
+                newItems.push({
+                    text: `📎 ${payload.filename}`,
+                    type: msg.is_sent ? 'sent' : 'received',
+                    timestamp: serverTimestamp,
+                    messageId: msg.id,
+                    status: msg.is_sent ? 'delivered' : null,
+                    reactions: msg.reactions || [],
+                    isAttachment: true,
+                    attachmentMeta: { filename: payload.filename, mimeType: payload.mime_type, isImage, payload, isSent: msg.is_sent },
+                });
+                continue;
+            }
+
+            const senderPublicKey = msg.is_sent
+                ? contacts.find(c => c.username === username)?.public_key
+                : payload.sender_public_key;
+            if (!senderPublicKey) continue;
+
+            const decrypted = await CryptoManager.decryptMessage(
+                payload.ciphertext, payload.nonce, senderPublicKey, userKeys.privateKey
+            );
+            newItems.push({
+                text: decrypted,
+                type: msg.is_sent ? 'sent' : 'received',
+                timestamp: serverTimestamp,
+                messageId: msg.id,
+                status: msg.is_sent ? 'delivered' : null,
+                reactions: msg.reactions || [],
+            });
+
+        } catch(e) {
+            console.error('Error processing older message:', e);
+            newItems.push({
+                text: '[Decryption failed]',
+                type: msg.is_sent ? 'sent' : 'received',
+                timestamp: serverTimestamp,
+                messageId: msg.id,
+                status: null,
+            });
+        }
+    }
+
+    // Prepend to chatHistory
+    chatHistory[username] = newItems.concat(chatHistory[username] || []);
+
+    // Build DOM fragment to insert before the first real message (after the banner)
+    const fragment = document.createDocumentFragment();
+    let lastDate = null;
+
+    newItems.forEach(msg => {
+        const msgDate = formatDate(msg.timestamp);
+        if (msgDate !== lastDate) {
+            const dd = document.createElement('div');
+            dd.className = 'date-divider';
+            dd.innerHTML = `<span>${msgDate}</span>`;
+            fragment.appendChild(dd);
+            lastDate = msgDate;
+        }
+
+        if (msg.isLocation) {
+            const { lat, lng } = msg.locationMeta;
+            fragment.appendChild(createLocationElement({
+                lat, lng, type: msg.type, timestamp: msg.timestamp,
+                messageId: msg.messageId, status: msg.status
+            }));
+        } else if (msg.isAttachment) {
+            const { filename, mimeType, isImage, payload, isSent } = msg.attachmentMeta;
+            const el = createAttachmentElement({
+                filename, mimeType, isImage, type: msg.type,
+                timestamp: msg.timestamp, messageId: msg.messageId,
+                status: msg.status, blobUrl: null,
+            });
+            fragment.appendChild(el);
+            (async () => {
+                const blobUrl = await handleIncomingAttachment(payload, { from: username, isSent });
+                if (blobUrl) updateAttachmentInUI(msg.messageId, filename, mimeType, isImage, blobUrl);
+            })();
+        } else {
+            fragment.appendChild(createMessageElement(msg));
+        }
+    });
+
+    // Insert the fragment before existing chat messages
+    const firstMessage = messagesArea.firstChild;
+    messagesArea.insertBefore(fragment, firstMessage);
+
+    // Restore scroll position so user stays at the same visual spot
+    const scrollHeightAfter = messagesArea.scrollHeight;
+    messagesArea.scrollTop = scrollTopBefore + (scrollHeightAfter - scrollHeightBefore);
+}
+
+async function loadMoreMessages() {
+    if (chatPagination.loading || !chatPagination.hasMore || !currentRecipient) return;
+    chatPagination.loading = true;
+
+    const loadBtn = document.getElementById('loadMoreBtn');
+    const dateBtn = document.getElementById('loadByDateBtn');
+    if (loadBtn) { loadBtn.disabled = true; loadBtn.textContent = 'Loading…'; }
+    if (dateBtn) dateBtn.disabled = true;
+
+    try {
+        const url = `/api/chat/history/${currentUser}/${currentRecipient}/paged?limit=10&before_id=${chatPagination.oldestId}`;
+        const response = await fetch(url);
+        if (response.ok) {
+            const data = await response.json();
+            chatPagination.hasMore = data.has_more || false;
+            chatPagination.oldestId = data.oldest_id || chatPagination.oldestId;
+            await prependMessages(data.messages, currentRecipient);
+        }
+    } catch(e) {
+        console.error('Error loading more messages:', e);
+    } finally {
+        chatPagination.loading = false;
+        if (loadBtn) { loadBtn.disabled = false; loadBtn.textContent = '⬆ Load 10 more'; }
+        if (dateBtn) dateBtn.disabled = false;
+        updateLoadMoreBanner();
+    }
+}
+
+async function loadMessagesByDate(beforeDate) {
+    if (chatPagination.loading || !currentRecipient) return;
+    chatPagination.loading = true;
+
+    const loadBtn = document.getElementById('loadMoreBtn');
+    const dateBtn = document.getElementById('loadByDateBtn');
+    if (loadBtn) loadBtn.disabled = true;
+    if (dateBtn) { dateBtn.disabled = true; dateBtn.textContent = 'Loading…'; }
+
+    try {
+        // Fetch up to 50 messages before the chosen date
+        const isoDate = new Date(beforeDate).toISOString();
+        const url = `/api/chat/history/${currentUser}/${currentRecipient}/paged?limit=50&before_date=${encodeURIComponent(isoDate)}`;
+        const response = await fetch(url);
+        if (response.ok) {
+            const data = await response.json();
+            // Update oldest_id to the oldest in the newly returned set if it's older
+            if (data.oldest_id && (!chatPagination.oldestId || data.oldest_id < chatPagination.oldestId)) {
+                chatPagination.oldestId = data.oldest_id;
+            }
+            chatPagination.hasMore = data.has_more || false;
+            await prependMessages(data.messages, currentRecipient);
+        }
+    } catch(e) {
+        console.error('Error loading messages by date:', e);
+    } finally {
+        chatPagination.loading = false;
+        if (loadBtn) loadBtn.disabled = false;
+        if (dateBtn) { dateBtn.disabled = false; dateBtn.textContent = '📅 Load until date'; }
+        updateLoadMoreBanner();
+    }
+}
+
+function openDateFilterModal() {
+    const modal = document.getElementById('dateFilterModal');
+    if (!modal) return;
+    // Default to yesterday
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    document.getElementById('dateFilterInput').value = yesterday.toISOString().slice(0, 10);
+    modal.classList.add('show');
+}
+
+function closeDateFilterModal() {
+    const modal = document.getElementById('dateFilterModal');
+    if (modal) modal.classList.remove('show');
 }
 
 // ==================== CHAT SETTINGS ====================
@@ -3570,6 +3807,23 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     document.getElementById('lightboxSaveBtn').addEventListener('click', downloadLightboxImage);
     document.getElementById('lightboxCloseBtn').addEventListener('click', closeImageLightbox);
+
+    // ===== LOAD MORE / PAGINATION =====
+    document.getElementById('loadMoreBtn').addEventListener('click', loadMoreMessages);
+    document.getElementById('loadByDateBtn').addEventListener('click', openDateFilterModal);
+    document.getElementById('dateFilterCancelBtn').addEventListener('click', closeDateFilterModal);
+    document.getElementById('dateFilterApplyBtn').addEventListener('click', () => {
+        const val = document.getElementById('dateFilterInput').value;
+        if (!val) return;
+        closeDateFilterModal();
+        // Load messages BEFORE the end of the selected day (i.e. midnight at start of next day)
+        const endOfDay = new Date(val);
+        endOfDay.setDate(endOfDay.getDate() + 1);
+        loadMessagesByDate(endOfDay.toISOString());
+    });
+    document.getElementById('dateFilterModal').addEventListener('click', (e) => {
+        if (e.target.id === 'dateFilterModal') closeDateFilterModal();
+    });
 
     // ===== MOBILE VIEWPORT HEIGHT =====
     function setVH() {

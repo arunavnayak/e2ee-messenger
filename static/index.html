@@ -1,1868 +1,2003 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SecureChat - End-to-End Encrypted Messenger</title>
-    <style>
-        :root {
-            --primary-color: #667eea;
-            --primary-dark: #764ba2;
-            --bg-light: #f0f2f5;
-            --text-dark: #333;
-            --text-gray: #65676b;
-            --border-color: #e1e8ed;
-            --sent-bg: #667eea;
-            --received-bg: #ffffff;
-            --vh: 1vh;
-        }
-
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: var(--bg-light);
-            height: 100dvh;
-            overflow: hidden;
-        }
-
-        /* ===== LOGIN PAGE ===== */
-        .login-container {
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            height: 100dvh;
-            background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
-            padding: 20px;
-        }
-
-        .login-box {
-            background: white;
-            padding: 40px 30px;
-            border-radius: 20px;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
-            width: 100%;
-            max-width: 400px;
-        }
-
-        .login-box h1 {
-            text-align: center;
-            color: var(--primary-color);
-            margin-bottom: 10px;
-            font-size: 32px;
-        }
-
-        .login-box .subtitle {
-            text-align: center;
-            color: #666;
-            margin-bottom: 30px;
-            font-size: 14px;
-        }
-
-        .tab-switcher {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 25px;
-        }
-
-        .tab-btn {
-            flex: 1;
-            padding: 10px;
-            background: #f5f6f7;
-            border: none;
-            border-radius: 10px;
-            font-size: 15px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s;
-        }
-
-        .tab-btn.active {
-            background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
-            color: white;
-        }
-
-        .form-container {
-            display: none;
-        }
-
-        .form-container.active {
-            display: block;
-        }
-
-        .input-group {
-            margin-bottom: 20px;
-        }
-
-        .input-group label {
-            display: block;
-            margin-bottom: 8px;
-            color: var(--text-dark);
-            font-weight: 500;
-            font-size: 14px;
-        }
-
-        .input-group input {
-            width: 100%;
-            padding: 12px 15px;
-            border: 2px solid var(--border-color);
-            border-radius: 10px;
-            font-size: 16px;
-            transition: border 0.3s;
-        }
-
-        .input-group input:focus {
-            outline: none;
-            border-color: var(--primary-color);
-        }
-
-        .submit-btn {
-            width: 100%;
-            padding: 14px;
-            background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
-            color: white;
-            border: none;
-            border-radius: 10px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: transform 0.2s;
-        }
-
-        .submit-btn:hover {
-            transform: translateY(-2px);
-        }
-
-        .submit-btn:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-            transform: none;
-        }
-
-        .status-message {
-            margin-top: 15px;
-            padding: 10px;
-            border-radius: 8px;
-            text-align: center;
-            font-size: 14px;
-            display: none;
-        }
-
-        .status-message.error {
-            background: #fee;
-            color: #c00;
-            display: block;
-        }
-
-        .status-message.success {
-            background: #efe;
-            color: #080;
-            display: block;
-        }
-
-        /* ===== MAIN CHAT CONTAINER ===== */
-        .chat-container {
-            display: none;
-            height: 100dvh;
-            max-width: 480px;
-            margin: 0 auto;
-            background: white;
-            position: relative;
-        }
-
-        /* ===== USER LIST PAGE ===== */
-        .user-list-page {
-            display: flex;
-            flex-direction: column;
-            height: 100dvh;
-        }
-
-        .header {
-            background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
-            color: white;
-            padding: 15px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-
-        .header h2 {
-            font-size: 20px;
-        }
-
-        .header-icons {
-            display: flex;
-            gap: 15px;
-        }
-
-        .header-icons button {
-            background: none;
-            border: none;
-            color: white;
-            font-size: 20px;
-            cursor: pointer;
-            padding: 5px;
-        }
-
-        .search-bar {
-            padding: 10px 15px;
-            background: #f0f2f5;
-            border-bottom: 1px solid var(--border-color);
-        }
-
-        .search-bar input {
-            width: 100%;
-            padding: 10px 15px;
-            border: none;
-            border-radius: 20px;
-            background: white;
-            font-size: 15px;
-        }
-
-        .search-bar input:focus {
-            outline: none;
-        }
-
-        .users-list {
-            flex: 1;
-            overflow-y: auto;
-        }
-
-        .user-item {
-            display: flex;
-            align-items: center;
-            padding: 12px 15px;
-            border-bottom: 1px solid #f0f2f5;
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-
-        .user-item:hover {
-            background: #f5f6f7;
-        }
-
-        .user-avatar {
-            width: 50px;
-            height: 50px;
-            border-radius: 50%;
-            background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-weight: bold;
-            font-size: 18px;
-            margin-right: 12px;
-            flex-shrink: 0;
-        }
-
-        .user-info {
-            flex: 1;
-            min-width: 0;
-        }
-
-        .user-name {
-            font-weight: 600;
-            font-size: 16px;
-            margin-bottom: 3px;
-        }
-
-        .user-last-message {
-            color: var(--text-gray);
-            font-size: 14px;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-        .user-meta {
-            display: flex;
-            flex-direction: column;
-            align-items: flex-end;
-        }
-
-        .message-time {
-            font-size: 12px;
-            color: var(--text-gray);
-            margin-bottom: 5px;
-        }
-
-        .unread-badge {
-            background: var(--primary-color);
-            color: white;
-            border-radius: 10px;
-            padding: 2px 8px;
-            font-size: 12px;
-            font-weight: 600;
-            min-width: 20px;
-            text-align: center;
-        }
-
-        .message-time {
-            font-size: 12px;
-            color: var(--text-gray);
-            margin-bottom: 5px;
-        }
-
-        .unread-badge {
-            background: var(--primary-color);
-            color: white;
-            border-radius: 10px;
-            padding: 2px 8px;
-            font-size: 12px;
-            font-weight: 600;
-            min-width: 20px;
-            text-align: center;
-        }
-
-        .encryption-indicator {
-            font-size: 11px;
-            color: #888;
-            margin-top: 2px;
-        }
-
-        /* ===== CHAT PAGE ===== */
-        .chat-page {
-            display: none;
-            flex-direction: column;
-            height: 100dvh;
-        }
-
-        .chat-header {
-            background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
-            color: white;
-            padding: 12px 15px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-
-        .chat-header-left {
-            display: flex;
-            align-items: center;
-            flex: 1;
-            min-width: 0;
-        }
-
-        .back-btn {
-            background: none;
-            border: none;
-            color: white;
-            font-size: 24px;
-            cursor: pointer;
-            margin-right: 10px;
-            padding: 5px;
-        }
-
-        .chat-user-avatar {
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            background: rgba(255, 255, 255, 0.3);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-weight: bold;
-            margin-right: 10px;
-            flex-shrink: 0;
-        }
-
-        .chat-user-info h3 {
-            font-size: 16px;
-            font-weight: 600;
-        }
-
-        .chat-user-status {
-            font-size: 12px;
-            opacity: 0.9;
-        }
-
-        .chat-header-right button {
-            background: none;
-            border: none;
-            color: white;
-            font-size: 20px;
-            cursor: pointer;
-            padding: 5px;
-        }
-
-        .messages-area {
-            flex: 1;
-            overflow-y: auto;
-            overflow-x: hidden;
-            padding: 15px;
-            min-height: 0;
-            background: #e5ddd5;
-            background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect fill="%23e5ddd5" width="100" height="100"/><circle fill="%23d1c7bb" cx="50" cy="50" r="1" opacity="0.3"/></svg>');
-        }
-
-        .date-divider {
-            text-align: center;
-            margin: 20px 0;
-            position: relative;
-        }
-
-        .date-divider span {
-            background: rgba(255, 255, 255, 0.9);
-            padding: 5px 12px;
-            border-radius: 7px;
-            font-size: 12px;
-            color: #667;
-            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
-        }
-
-        .message {
-            display: flex;
-            margin-bottom: 12px;
-            animation: slideIn 0.2s ease-out;
-        }
-
-        @keyframes slideIn {
-            from {
-                opacity: 0;
-                transform: translateY(10px);
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>SecureChat - End-to-End Encrypted Messenger</title>
+        <style>
+            :root {
+                --primary-color: #667eea;
+                --primary-dark: #764ba2;
+                --bg-light: #f0f2f5;
+                --text-dark: #333;
+                --text-gray: #65676b;
+                --border-color: #e1e8ed;
+                --sent-bg: #667eea;
+                --received-bg: #ffffff;
+                --vh: 1vh;
             }
-            to {
-                opacity: 1;
-                transform: translateY(0);
+
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
             }
-        }
 
-        .message.sent {
-            justify-content: flex-end;
-        }
-
-        .message.received {
-            justify-content: flex-start;
-        }
-
-        .message-bubble {
-            max-width: 75%;
-            padding: 8px 12px;
-            border-radius: 8px;
-            position: relative;
-            word-wrap: break-word;
-        }
-
-        .message.sent .message-bubble {
-            background: var(--sent-bg);
-            color: white;
-            border-radius: 8px 8px 0 8px;
-        }
-
-        .message.received .message-bubble {
-            background: white;
-            color: var(--text-dark);
-            border-radius: 8px 8px 8px 0;
-            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
-        }
-
-        .message-reactions {
-            margin-top: 4px;
-            display: flex;
-            gap: 4px;
-            flex-wrap: wrap;
-        }
-
-        .reaction-emoji {
-            font-size: 14px;
-            padding: 2px 6px;
-            border-radius: 10px;
-            background: rgba(0,0,0,0.05);
-        }
-        .reaction-picker {
-            position: absolute;
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-            padding: 6px 8px;
-            display: flex;
-            gap: 6px;
-            z-index: 200;
-        }
-        .reaction-picker span {
-            cursor: pointer;
-            font-size: 18px;
-        }
-
-        .emoji-btn {
-            background: none;
-            border: none;
-            font-size: 22px;
-            cursor: pointer;
-            padding: 5px;
-        }
-        .emoji-picker {
-            position: absolute;
-            bottom: 65px;
-            right: 60px;
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-            padding: 8px;
-            display: grid;
-            grid-template-columns: repeat(10, 1fr);
-            gap: 6px;
-            z-index: 150;
-        }
-        .emoji-picker span {
-            cursor: pointer;
-            font-size: 20px;
-        }
-
-
-        .message-text {
-            margin-bottom: 2px;
-            font-size: 15px;
-            line-height: 1.4;
-        }
-
-        .message-text.encrypted {
-            font-style: italic;
-            opacity: 0.7;
-        }
-
-        .message-footer {
-            display: flex;
-            align-items: center;
-            justify-content: flex-end;
-            gap: 4px;
-            font-size: 11px;
-            margin-top: 2px;
-        }
-
-        .message.sent .message-footer {
-            color: rgba(255, 255, 255, 0.8);
-        }
-
-        .message.received .message-footer {
-            color: #667;
-        }
-
-        .message-status {
-            font-size: 14px;
-        }
-
-        .status-sent {
-            color: rgba(255, 255, 255, 0.6);
-        }
-
-        .status-delivered {
-            color: rgba(255, 255, 255, 0.8);
-        }
-
-        .status-read {
-            color: #4fc3f7;
-        }
-
-        .status-failed {
-            color: #f44336;
-        }
-
-        .typing-indicator {
-            display: none;
-            padding: 12px 15px;
-            background: rgba(255, 255, 255, 0.9);
-            font-size: 14px;
-            color: #667;
-            font-style: italic;
-        }
-
-        .typing-indicator.show {
-            display: block;
-        }
-
-        .input-area {
-            padding: 10px 15px;
-            background: #f0f2f5;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .input-area button {
-            background: none;
-            border: none;
-            color: var(--text-gray);
-            font-size: 22px;
-            cursor: pointer;
-            padding: 5px;
-        }
-
-        .message-input {
-            flex: 1;
-            padding: 10px 15px;
-            border: none;
-            border-radius: 20px;
-            background: white;
-            font-size: 15px;
-            resize: none;
-            max-height: 100px;
-        }
-
-        .message-input:focus {
-            outline: none;
-        }
-
-        .send-btn {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border: none;
-            color: white;
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            cursor: pointer;
-            font-size: 20px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: transform 0.2s;
-        }
-
-        .send-btn:hover {
-            transform: scale(1.1);
-        }
-
-        .send-btn:active {
-            transform: scale(0.95);
-        }
-
-        /* ===== SETTINGS MENU ===== */
-        .settings-menu {
-            /*position: absolute;
-            top: 60px;
-            right: 15px;
-            background: white;
-            border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-            overflow: hidden;
-            opacity: 0;
-            visibility: hidden;
-            transform: translateY(-10px);
-            transition: all 0.2s;
-            z-index: 1000;*/
-            display: none;
-            position: absolute;
-            top: 55px;
-            right: 15px;
-            background: white;
-            border-radius: 10px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-            padding: 5px 0;
-            z-index: 100;
-            min-width: 180px;
-        }
-
-        .settings-menu.show {
-            /*opacity: 1;
-            visibility: visible;
-            transform: translateY(0);*/
-            display: block;
-            animation: fadeIn 0.2s;
-        }
-
-        .settings-item {
-            padding: 12px 20px;
-            cursor: pointer;
-            font-size: 14px;
-            color: #333;
-            transition: background 0.2s;
-        }
-
-        .settings-item:hover {
-            background: #f0f2f5;
-        }
-
-        /*.settings-menu button {
-            display: block;
-            width: 100%;
-            padding: 12px 20px;
-            background: none;
-            border: none;
-            text-align: left;
-            font-size: 15px;
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-
-        .settings-menu button:hover {
-            background: #f5f6f7;
-        }*/
-
-        /* Attachment Menu */
-        .attachment-menu {
-            display: none;
-            position: absolute;
-            bottom: 65px;
-            left: 15px;
-            background: white;
-            border-radius: 15px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-            padding: 10px;
-            z-index: 100;
-        }
-
-        .attachment-menu.show {
-            display: block;
-            animation: slideUp 0.3s;
-        }
-
-        @keyframes slideUp {
-            from {
-                opacity: 0;
-                transform: translateY(10px);
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+                background: var(--bg-light);
+                height: 100dvh;
+                overflow: hidden;
             }
-            to {
-                opacity: 1;
-                transform: translateY(0);
+
+            /* ===== LOGIN PAGE ===== */
+            .login-container {
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+                align-items: center;
+                height: 100dvh;
+                background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
+                padding: 20px;
             }
-        }
 
-        .attachment-item {
-            display: flex;
-            align-items: center;
-            padding: 12px 15px;
-            cursor: pointer;
-            border-radius: 10px;
-            transition: background 0.2s;
-        }
+            .login-box {
+                background: white;
+                padding: 40px 30px;
+                border-radius: 20px;
+                box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+                width: 100%;
+                max-width: 400px;
+            }
 
-        .attachment-item:hover {
-            background: #f0f2f5;
-        }
+            .login-box h1 {
+                text-align: center;
+                color: var(--primary-color);
+                margin-bottom: 10px;
+                font-size: 32px;
+            }
 
-        .attachment-icon {
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 20px;
-            margin-right: 12px;
-        }
+            .login-box .subtitle {
+                text-align: center;
+                color: #666;
+                margin-bottom: 30px;
+                font-size: 14px;
+            }
 
-        .attachment-icon.document {
-            background: #5f6caf;
-        }
+            .tab-switcher {
+                display: flex;
+                gap: 10px;
+                margin-bottom: 25px;
+            }
 
-        .attachment-icon.camera {
-            background: #d3396d;
-        }
+            .tab-btn {
+                flex: 1;
+                padding: 10px;
+                background: #f5f6f7;
+                border: none;
+                border-radius: 10px;
+                font-size: 15px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: all 0.3s;
+            }
 
-        .attachment-icon.gallery {
-            background: #ac44cf;
-        }
+            .tab-btn.active {
+                background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
+                color: white;
+            }
 
-        .attachment-icon.location {
-            background: #04a784;
-        }
+            .form-container {
+                display: none;
+            }
 
-        .attachment-label {
-            font-size: 14px;
-            color: #333;
-        }
+            .form-container.active {
+                display: block;
+            }
 
-        /* ===== ATTACHMENT CARDS ===== */
-        .attach-bubble {
-            padding: 4px 4px 4px !important;
-            min-width: 240px;
-            max-width: 280px;
-            background: transparent !important;
-            box-shadow: none !important;
-        }
-        .message.sent .attach-bubble,
-        .message.received .attach-bubble {
-            background: transparent !important;
-            box-shadow: none !important;
-        }
+            .input-group {
+                margin-bottom: 20px;
+            }
 
-        .attach-card {
-            display: flex;
-            border-radius: 10px;
-            overflow: hidden;
-            width: 100%;
-            cursor: default;
-            box-shadow: 0 1px 4px rgba(0,0,0,0.08);
-        }
+            .input-group label {
+                display: block;
+                margin-bottom: 8px;
+                color: var(--text-dark);
+                font-weight: 500;
+                font-size: 14px;
+            }
 
-        /* File card (PDF / DOC / TXT) — flex-column so time row stacks at bottom */
-        .attach-card-file {
-            flex-direction: column;
-            background: #fff;
-            border: 1.5px solid #e5e7eb;
-            border-radius: 10px;
-        }
-        .attach-card-file.sent {
-            background: #eef0ff;
-            border-color: #c7d0f8;
-        }
+            .input-group input {
+                width: 100%;
+                padding: 12px 15px;
+                border: 2px solid var(--border-color);
+                border-radius: 10px;
+                font-size: 16px;
+                transition: border 0.3s;
+            }
 
-        /* Top row: icon + meta side by side */
-        .attach-card-top {
-            display: flex;
-            align-items: center;
-            width: 100%;
-        }
+            .input-group input:focus {
+                outline: none;
+                border-color: var(--primary-color);
+            }
 
-        .attach-icon-wrap {
-            width: 52px;
-            min-width: 52px;
-            height: 60px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: rgba(0,0,0,0.03);
-            padding: 8px;
-            border-right: 1.5px solid rgba(0,0,0,0.06);
-            flex-shrink: 0;
-        }
-        .attach-icon-wrap svg {
-            width: 34px;
-            height: 34px;
-        }
+            .submit-btn {
+                width: 100%;
+                padding: 14px;
+                background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
+                color: white;
+                border: none;
+                border-radius: 10px;
+                font-size: 16px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: transform 0.2s;
+            }
 
-        .attach-card-body {
-            display: flex;
-            align-items: center;
-            flex: 1;
-            min-width: 0;
-        }
+            .submit-btn:hover {
+                transform: translateY(-2px);
+            }
 
-        .attach-meta {
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            gap: 5px;
-            padding: 8px 10px;
-            flex: 1;
-            min-width: 0;
-        }
+            .submit-btn:disabled {
+                opacity: 0.6;
+                cursor: not-allowed;
+                transform: none;
+            }
 
-        .attach-name {
-            font-size: 13px;
-            font-weight: 600;
-            color: #1f2937;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            line-height: 1.3;
-        }
-        .attach-card-file.sent .attach-name { color: #2d3a8c; }
+            .status-message {
+                margin-top: 15px;
+                padding: 10px;
+                border-radius: 8px;
+                text-align: center;
+                font-size: 14px;
+                display: none;
+            }
 
-        .attach-status-text {
-            font-size: 11px;
-            color: #9ca3af;
-            font-style: italic;
-        }
+            .status-message.error {
+                background: #fee;
+                color: #c00;
+                display: block;
+            }
 
-        .attach-download-btn {
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-            background: #667eea;
-            color: #fff;
-            border: none;
-            border-radius: 6px;
-            padding: 4px 10px;
-            font-size: 11px;
-            font-weight: 600;
-            cursor: pointer;
-            align-self: flex-start;
-            transition: background 0.2s;
-        }
-        .attach-download-btn:hover { background: #4f5ec7; }
+            .status-message.success {
+                background: #efe;
+                color: #080;
+                display: block;
+            }
 
-        /* Time row — INSIDE the card, pinned bottom-right */
-        .attach-footer {
-            display: flex;
-            justify-content: flex-end;
-            align-items: center;
-            gap: 4px;
-            padding: 0 8px 5px;
-        }
-        .attach-footer .message-time { margin: 0; padding: 0; }
-        .attach-card-file.sent .attach-footer .message-time { color: #667eea; }
-        .attach-card-file.sent .attach-footer .message-status { color: #667eea; }
-
-        /* Image card */
-        .attach-card-image {
-            flex-direction: column;
-            background: #000;
-            border: none;
-            cursor: pointer;
-            transition: opacity 0.2s;
-            max-width: 240px;
-            border-radius: 10px;
-        }
-        .attach-card-image:hover { opacity: 0.92; }
-
-        .attach-thumb {
-            width: 100%;
-            max-height: 200px;
-            object-fit: cover;
-            display: block;
-        }
-
-        .attach-card-footer {
-            padding: 5px 10px;
-            background: rgba(0,0,0,0.55);
-        }
-        .attach-card-image .attach-name {
-            font-size: 11px;
-            color: #e5e7eb;
-            font-weight: 500;
-        }
-        /* ===== VIDEO CALL BUBBLE ===== */
-        .call-bubble-wrap {
-            display: flex;
-            margin: 6px 0;
-        }
-        .call-bubble-wrap.sent { justify-content: flex-end; }
-        .call-bubble-wrap.received { justify-content: flex-start; }
-
-        .call-bubble {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            padding: 8px 14px 6px;
-            border-radius: 10px;
-            max-width: 75%;
-            min-width: 180px;
-        }
-        .call-bubble-wrap.sent .call-bubble {
-            background: var(--sent-bg);
-            color: white;
-            border-radius: 8px 8px 0 8px;
-            flex-direction: row-reverse;
-            text-align: right;
-        }
-        .call-bubble-wrap.received .call-bubble {
-            background: white;
-            color: var(--text-dark);
-            border-radius: 8px 8px 8px 0;
-            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
-        }
-        .call-bubble-icon {
-            font-size: 20px;
-            flex-shrink: 0;
-        }
-        .call-bubble-info { flex: 1; min-width: 0; }
-        .call-bubble-label {
-            font-size: 14px;
-            font-weight: 600;
-            line-height: 1.3;
-        }
-        .call-bubble-wrap.sent .call-bubble-label { color: rgba(255,255,255,0.95); }
-        .call-bubble-wrap.received .call-bubble-label { color: #1a1a2e; }
-        .call-bubble-footer {
-            display: flex;
-            align-items: center;
-            justify-content: flex-end;
-            gap: 4px;
-            font-size: 11px;
-            margin-top: 3px;
-        }
-        .call-bubble-wrap.sent .call-bubble-footer { color: rgba(255,255,255,0.75); }
-        .call-bubble-wrap.received .call-bubble-footer { color: #667; }
-
-        /* ===== PENDING APPROVAL MODAL ===== */
-        #pendingApprovalModal {
-            display: none;
-            position: fixed;
-            inset: 0;
-            background: rgba(0,0,0,0.55);
-            z-index: 8000;
-            align-items: center;
-            justify-content: center;
-        }
-        #pendingApprovalModal.show { display: flex; }
-        .approval-card {
-            background: #fff;
-            border-radius: 18px;
-            padding: 36px 32px 28px;
-            max-width: 360px;
-            width: 90%;
-            text-align: center;
-            box-shadow: 0 8px 40px rgba(0,0,0,0.18);
-        }
-        .approval-icon {
-            font-size: 52px;
-            margin-bottom: 12px;
-        }
-        .approval-card h2 {
-            font-size: 20px;
-            font-weight: 700;
-            color: #1f2937;
-            margin-bottom: 10px;
-        }
-        .approval-card p {
-            font-size: 14px;
-            color: #6b7280;
-            line-height: 1.6;
-            margin-bottom: 24px;
-        }
-        .approval-card .btn-primary {
-            width: 100%;
-        }
-
-        /* ===== ADMIN PENDING USERS SECTION ===== */
-        .pending-users-section {
-            margin-top: 20px;
-            border-top: 1px solid #e5e7eb;
-            padding-top: 16px;
-        }
-        .pending-users-section h3 {
-            font-size: 14px;
-            font-weight: 700;
-            color: #374151;
-            margin-bottom: 10px;
-        }
-        #pendingUsersList {
-            max-height: 200px;
-            overflow-y: auto;
-        }
-        .pending-user-row {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 8px 10px;
-            border-radius: 8px;
-            background: #f9fafb;
-            margin-bottom: 6px;
-            border: 1px solid #e5e7eb;
-        }
-        .pending-user-info {
-            display: flex;
-            flex-direction: column;
-        }
-        .pending-user-name {
-            font-size: 13px;
-            font-weight: 600;
-            color: #1f2937;
-        }
-        .pending-user-email {
-            font-size: 11px;
-            color: #9ca3af;
-            margin-top: 1px;
-        }
-        .approve-btn {
-            background: #10b981;
-            color: #fff;
-            border: none;
-            border-radius: 6px;
-            padding: 5px 12px;
-            font-size: 12px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: background 0.2s;
-            white-space: nowrap;
-        }
-        .approve-btn:hover { background: #059669; }
-        .approve-btn:disabled {
-            background: #d1fae5;
-            color: #6ee7b7;
-            cursor: default;
-        }
-        .no-pending-msg {
-            font-size: 13px;
-            color: #9ca3af;
-            text-align: center;
-            padding: 12px 0;
-            font-style: italic;
-        }
-
-        /* ===== DB BACKUP / RESTORE MODAL ===== */
-        #dbBackupModal .modal-content {
-            max-width: 480px;
-        }
-        .db-section {
-            margin-top: 18px;
-            border-top: 1px solid #e5e7eb;
-            padding-top: 14px;
-        }
-        .db-section h3 {
-            font-size: 13px;
-            font-weight: 700;
-            color: #374151;
-            margin-bottom: 10px;
-        }
-        .db-password-row {
-            display: flex;
-            gap: 8px;
-            align-items: center;
-            margin-bottom: 10px;
-        }
-        .db-password-row input {
-            flex: 1;
-        }
-        .db-action-btn {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: #fff;
-            border: none;
-            border-radius: 8px;
-            padding: 9px 16px;
-            font-size: 13px;
-            font-weight: 600;
-            cursor: pointer;
-            white-space: nowrap;
-            transition: opacity .2s;
-        }
-        .db-action-btn:disabled { opacity: .55; cursor: default; }
-        .db-action-btn.danger {
-            background: linear-gradient(135deg, #e53e3e 0%, #9b2335 100%);
-        }
-        .db-action-btn.neutral {
-            background: linear-gradient(135deg, #0ea5e9 0%, #0369a1 100%);
-        }
-        .db-log {
-            background: #0f172a;
-            color: #86efac;
-            font-family: 'Courier New', monospace;
-            font-size: 11.5px;
-            border-radius: 8px;
-            padding: 10px 12px;
-            max-height: 180px;
-            overflow-y: auto;
-            margin-top: 10px;
-            display: none;
-            line-height: 1.6;
-        }
-        .db-log.visible { display: block; }
-        .db-log .log-ok   { color: #86efac; }
-        .db-log .log-warn { color: #fde047; }
-        .db-log .log-err  { color: #fca5a5; }
-        .db-log .log-info { color: #7dd3fc; }
-        .db-upload-label {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            background: #f3f4f6;
-            border: 1.5px dashed #d1d5db;
-            border-radius: 8px;
-            padding: 10px 14px;
-            cursor: pointer;
-            font-size: 13px;
-            color: #6b7280;
-            transition: border-color .2s;
-            margin-bottom: 8px;
-        }
-        .db-upload-label:hover { border-color: #667eea; color: #667eea; }
-        .db-upload-label input[type="file"] { display: none; }
-        #dbRestoreFilename,
-        #dbDecryptFilename {
-            font-size: 12px;
-            color: #374151;
-            font-weight: 600;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            max-width: 240px;
-        }
-
-
-        /* ===== PASSWORD CHANGE MODAL ===== */
-        .modal-overlay {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0, 0, 0, 0.5);
-            z-index: 2000;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-        }
-
-        .modal-overlay.show {
-            display: flex;
-        }
-
-        .modal-content {
-            background: white;
-            padding: 30px;
-            border-radius: 20px;
-            width: 100%;
-            max-width: 400px;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
-        }
-
-        .modal-content h2 {
-            margin-bottom: 20px;
-            color: var(--text-dark);
-        }
-
-        .modal-buttons {
-            display: flex;
-            gap: 10px;
-            margin-top: 20px;
-        }
-
-        .modal-buttons button {
-            flex: 1;
-            padding: 12px;
-            border: none;
-            border-radius: 10px;
-            font-size: 15px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: transform 0.2s;
-        }
-
-        .btn-primary {
-            background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
-            color: white;
-        }
-
-        .btn-secondary {
-            background: #e1e8ed;
-            color: var(--text-dark);
-        }
-
-        /* ===== MOBILE RESPONSIVENESS ===== */
-        @media (max-width: 480px) {
+            /* ===== MAIN CHAT CONTAINER ===== */
             .chat-container {
-                max-width: 100%;
+                display: none;
+                height: 100dvh;
+                max-width: 480px;
+                margin: 0 auto;
+                background: white;
+                position: relative;
+            }
+
+            /* ===== USER LIST PAGE ===== */
+            .user-list-page {
+                display: flex;
+                flex-direction: column;
+                height: 100dvh;
+            }
+
+            .header {
+                background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
+                color: white;
+                padding: 15px;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+            }
+
+            .header h2 {
+                font-size: 20px;
+            }
+
+            .header-icons {
+                display: flex;
+                gap: 15px;
+            }
+
+            .header-icons button {
+                background: none;
+                border: none;
+                color: white;
+                font-size: 20px;
+                cursor: pointer;
+                padding: 5px;
+            }
+
+            .search-bar {
+                padding: 10px 15px;
+                background: #f0f2f5;
+                border-bottom: 1px solid var(--border-color);
+            }
+
+            .search-bar input {
+                width: 100%;
+                padding: 10px 15px;
+                border: none;
+                border-radius: 20px;
+                background: white;
+                font-size: 15px;
+            }
+
+            .search-bar input:focus {
+                outline: none;
+            }
+
+            .users-list {
+                flex: 1;
+                overflow-y: auto;
+            }
+
+            .user-item {
+                display: flex;
+                align-items: center;
+                padding: 12px 15px;
+                border-bottom: 1px solid #f0f2f5;
+                cursor: pointer;
+                transition: background 0.2s;
+            }
+
+            .user-item:hover {
+                background: #f5f6f7;
+            }
+
+            .user-avatar {
+                width: 50px;
+                height: 50px;
+                border-radius: 50%;
+                background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                color: white;
+                font-weight: bold;
+                font-size: 18px;
+                margin-right: 12px;
+                flex-shrink: 0;
+            }
+
+            .user-info {
+                flex: 1;
+                min-width: 0;
+            }
+
+            .user-name {
+                font-weight: 600;
+                font-size: 16px;
+                margin-bottom: 3px;
+            }
+
+            .user-last-message {
+                color: var(--text-gray);
+                font-size: 14px;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+
+            .user-meta {
+                display: flex;
+                flex-direction: column;
+                align-items: flex-end;
+            }
+
+            .message-time {
+                font-size: 12px;
+                color: var(--text-gray);
+                margin-bottom: 5px;
+            }
+
+            .unread-badge {
+                background: var(--primary-color);
+                color: white;
+                border-radius: 10px;
+                padding: 2px 8px;
+                font-size: 12px;
+                font-weight: 600;
+                min-width: 20px;
+                text-align: center;
+            }
+
+            .message-time {
+                font-size: 12px;
+                color: var(--text-gray);
+                margin-bottom: 5px;
+            }
+
+            .unread-badge {
+                background: var(--primary-color);
+                color: white;
+                border-radius: 10px;
+                padding: 2px 8px;
+                font-size: 12px;
+                font-weight: 600;
+                min-width: 20px;
+                text-align: center;
+            }
+
+            .encryption-indicator {
+                font-size: 11px;
+                color: #888;
+                margin-top: 2px;
+            }
+
+            /* ===== CHAT PAGE ===== */
+            .chat-page {
+                display: none;
+                flex-direction: column;
+                height: 100dvh;
+            }
+
+            .chat-header {
+                background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
+                color: white;
+                padding: 12px 15px;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+            }
+
+            .chat-header-left {
+                display: flex;
+                align-items: center;
+                flex: 1;
+                min-width: 0;
+            }
+
+            .back-btn {
+                background: none;
+                border: none;
+                color: white;
+                font-size: 24px;
+                cursor: pointer;
+                margin-right: 10px;
+                padding: 5px;
+            }
+
+            .chat-user-avatar {
+                width: 40px;
+                height: 40px;
+                border-radius: 50%;
+                background: rgba(255, 255, 255, 0.3);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                color: white;
+                font-weight: bold;
+                margin-right: 10px;
+                flex-shrink: 0;
+            }
+
+            .chat-user-info h3 {
+                font-size: 16px;
+                font-weight: 600;
+            }
+
+            .chat-user-status {
+                font-size: 12px;
+                opacity: 0.9;
+            }
+
+            .chat-header-right button {
+                background: none;
+                border: none;
+                color: white;
+                font-size: 20px;
+                cursor: pointer;
+                padding: 5px;
+            }
+
+            .messages-area {
+                flex: 1;
+                overflow-y: auto;
+                overflow-x: hidden;
+                padding: 15px;
+                min-height: 0;
+                background: #e5ddd5;
+                background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect fill="%23e5ddd5" width="100" height="100"/><circle fill="%23d1c7bb" cx="50" cy="50" r="1" opacity="0.3"/></svg>');
+            }
+
+            .date-divider {
+                text-align: center;
+                margin: 20px 0;
+                position: relative;
+            }
+
+            .date-divider span {
+                background: rgba(255, 255, 255, 0.9);
+                padding: 5px 12px;
+                border-radius: 7px;
+                font-size: 12px;
+                color: #667;
+                box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+            }
+
+            .message {
+                display: flex;
+                margin-bottom: 12px;
+                animation: slideIn 0.2s ease-out;
+            }
+
+            @keyframes slideIn {
+                from {
+                    opacity: 0;
+                    transform: translateY(10px);
+                }
+                to {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+            }
+
+            .message.sent {
+                justify-content: flex-end;
+            }
+
+            .message.received {
+                justify-content: flex-start;
             }
 
             .message-bubble {
-                max-width: 85%;
+                max-width: 75%;
+                padding: 8px 12px;
+                border-radius: 8px;
+                position: relative;
+                word-wrap: break-word;
             }
-        }
 
-        /* ===== LOADING SPINNER ===== */
-        .spinner {
-            display: inline-block;
-            width: 16px;
-            height: 16px;
-            border: 2px solid rgba(255, 255, 255, 0.3);
-            border-radius: 50%;
-            border-top-color: white;
-            animation: spin 0.8s linear infinite;
-        }
-
-        @keyframes spin {
-            to {
-                transform: rotate(360deg);
+            .message.sent .message-bubble {
+                background: var(--sent-bg);
+                color: white;
+                border-radius: 8px 8px 0 8px;
             }
-        }
 
-        /* Hide scrollbar for chat messages */
-        .messages-area::-webkit-scrollbar {
-            width: 6px;
-        }
+            .message.received .message-bubble {
+                background: white;
+                color: var(--text-dark);
+                border-radius: 8px 8px 8px 0;
+                box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+            }
 
-        .messages-area::-webkit-scrollbar-track {
-            background: transparent;
-        }
+            .message-reactions {
+                margin-top: 4px;
+                display: flex;
+                gap: 4px;
+                flex-wrap: wrap;
+            }
 
-        .messages-area::-webkit-scrollbar-thumb {
-            background: rgba(0, 0, 0, 0.2);
-            border-radius: 3px;
-        }
+            .reaction-emoji {
+                font-size: 14px;
+                padding: 2px 6px;
+                border-radius: 10px;
+                background: rgba(0,0,0,0.05);
+            }
+            .reaction-picker {
+                position: absolute;
+                background: white;
+                border-radius: 12px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                padding: 6px 8px;
+                display: flex;
+                gap: 6px;
+                z-index: 200;
+            }
+            .reaction-picker span {
+                cursor: pointer;
+                font-size: 18px;
+            }
 
-        /* ===== OTP Verification Page Styling ===== */
-        .otp-page {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            min-height: 100vh;
-            background-color: #f8fafc; /* gray-100 */
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            z-index: 50;
-        }
+            .emoji-btn {
+                background: none;
+                border: none;
+                font-size: 22px;
+                cursor: pointer;
+                padding: 5px;
+            }
+            .emoji-picker {
+                position: absolute;
+                bottom: 65px;
+                right: 60px;
+                background: white;
+                border-radius: 12px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                padding: 8px;
+                display: grid;
+                grid-template-columns: repeat(10, 1fr);
+                gap: 6px;
+                z-index: 150;
+            }
+            .emoji-picker span {
+                cursor: pointer;
+                font-size: 20px;
+            }
 
-        .otp-container {
-            animation: fadeIn 0.25s ease-out;
-        }
 
-        .otp-input {
-            font-family: 'Courier New', monospace;
-            letter-spacing: 6px;
-            text-transform: uppercase;
-        }
+            .message-text {
+                margin-bottom: 2px;
+                font-size: 15px;
+                line-height: 1.4;
+            }
 
-        /* Subtle fade animation */
-        @keyframes fadeIn {
-            from {
+            .message-text.encrypted {
+                font-style: italic;
+                opacity: 0.7;
+            }
+
+            .message-footer {
+                display: flex;
+                align-items: center;
+                justify-content: flex-end;
+                gap: 4px;
+                font-size: 11px;
+                margin-top: 2px;
+            }
+
+            .message.sent .message-footer {
+                color: rgba(255, 255, 255, 0.8);
+            }
+
+            .message.received .message-footer {
+                color: #667;
+            }
+
+            .message-status {
+                font-size: 14px;
+            }
+
+            .status-sent {
+                color: rgba(255, 255, 255, 0.6);
+            }
+
+            .status-delivered {
+                color: rgba(255, 255, 255, 0.8);
+            }
+
+            .status-read {
+                color: #4fc3f7;
+            }
+
+            .status-failed {
+                color: #f44336;
+            }
+
+            .typing-indicator {
+                display: none;
+                padding: 12px 15px;
+                background: rgba(255, 255, 255, 0.9);
+                font-size: 14px;
+                color: #667;
+                font-style: italic;
+            }
+
+            .typing-indicator.show {
+                display: block;
+            }
+
+            .input-area {
+                padding: 10px 15px;
+                background: #f0f2f5;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+
+            .input-area button {
+                background: none;
+                border: none;
+                color: var(--text-gray);
+                font-size: 22px;
+                cursor: pointer;
+                padding: 5px;
+            }
+
+            .message-input {
+                flex: 1;
+                padding: 10px 15px;
+                border: none;
+                border-radius: 20px;
+                background: white;
+                font-size: 15px;
+                resize: none;
+                max-height: 100px;
+            }
+
+            .message-input:focus {
+                outline: none;
+            }
+
+            .send-btn {
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                border: none;
+                color: white;
+                width: 40px;
+                height: 40px;
+                border-radius: 50%;
+                cursor: pointer;
+                font-size: 20px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                transition: transform 0.2s;
+            }
+
+            .send-btn:hover {
+                transform: scale(1.1);
+            }
+
+            .send-btn:active {
+                transform: scale(0.95);
+            }
+
+            /* ===== SETTINGS MENU ===== */
+            .settings-menu {
+                /*position: absolute;
+                top: 60px;
+                right: 15px;
+                background: white;
+                border-radius: 8px;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+                overflow: hidden;
                 opacity: 0;
-                transform: translateY(10px);
+                visibility: hidden;
+                transform: translateY(-10px);
+                transition: all 0.2s;
+                z-index: 1000;*/
+                display: none;
+                position: absolute;
+                top: 55px;
+                right: 15px;
+                background: white;
+                border-radius: 10px;
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+                padding: 5px 0;
+                z-index: 100;
+                min-width: 180px;
             }
-            to {
-                opacity: 1;
-                transform: translateY(0);
+
+            .settings-menu.show {
+                /*opacity: 1;
+                visibility: visible;
+                transform: translateY(0);*/
+                display: block;
+                animation: fadeIn 0.2s;
             }
-        }
 
-        /* Status message styling */
-        #resendOtpBtn[disabled] {
-            pointer-events: none;
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
+            .settings-item {
+                padding: 12px 20px;
+                cursor: pointer;
+                font-size: 14px;
+                color: #333;
+                transition: background 0.2s;
+            }
 
-        .status-message {
-            transition: color 0.2s ease, opacity 0.2s ease;
-        }
+            .settings-item:hover {
+                background: #f0f2f5;
+            }
 
-        .status-message.error {
-            color: #dc2626; /* red‑600 */
-        }
+            /*.settings-menu button {
+                display: block;
+                width: 100%;
+                padding: 12px 20px;
+                background: none;
+                border: none;
+                text-align: left;
+                font-size: 15px;
+                cursor: pointer;
+                transition: background 0.2s;
+            }
 
-        .status-message.success {
-            color: #16a34a; /* green‑600 */
-        }
+            .settings-menu button:hover {
+                background: #f5f6f7;
+            }*/
 
-    </style>
-</head>
-<body>
-<!-- Login/Register Screen -->
-<div id="authScreen" class="login-container">
-    <div class="login-box">
-        <h1>🔐 SecureChat</h1>
-        <p class="subtitle">End-to-End Encrypted Messaging</p>
+            /* Attachment Menu */
+            .attachment-menu {
+                display: none;
+                position: absolute;
+                bottom: 65px;
+                left: 15px;
+                background: white;
+                border-radius: 15px;
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+                padding: 10px;
+                z-index: 100;
+            }
 
-        <div class="tab-switcher">
-            <button class="tab-btn active" id="loginTab">Login</button>
-            <button class="tab-btn" id="registerTab">Register</button>
-        </div>
+            .attachment-menu.show {
+                display: block;
+                animation: slideUp 0.3s;
+            }
 
-        <!-- Login Form -->
-        <div id="loginForm" class="form-container active">
-            <div class="input-group">
-                <label>Username</label>
-                <input type="text" id="loginUsername" placeholder="Enter your username" autocomplete="username">
+            @keyframes slideUp {
+                from {
+                    opacity: 0;
+                    transform: translateY(10px);
+                }
+                to {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+            }
+
+            .attachment-item {
+                display: flex;
+                align-items: center;
+                padding: 12px 15px;
+                cursor: pointer;
+                border-radius: 10px;
+                transition: background 0.2s;
+            }
+
+            .attachment-item:hover {
+                background: #f0f2f5;
+            }
+
+            .attachment-icon {
+                width: 40px;
+                height: 40px;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 20px;
+                margin-right: 12px;
+            }
+
+            .attachment-icon.document {
+                background: #5f6caf;
+            }
+
+            .attachment-icon.camera {
+                background: #d3396d;
+            }
+
+            .attachment-icon.gallery {
+                background: #ac44cf;
+            }
+
+            .attachment-icon.location {
+                background: #04a784;
+            }
+
+            .attachment-label {
+                font-size: 14px;
+                color: #333;
+            }
+
+            /* ===== ATTACHMENT CARDS ===== */
+            .attach-bubble {
+                padding: 4px 4px 4px !important;
+                min-width: 240px;
+                max-width: 280px;
+                background: transparent !important;
+                box-shadow: none !important;
+            }
+            .message.sent .attach-bubble,
+            .message.received .attach-bubble {
+                background: transparent !important;
+                box-shadow: none !important;
+            }
+
+            .attach-card {
+                display: flex;
+                border-radius: 10px;
+                overflow: hidden;
+                width: 100%;
+                cursor: default;
+                box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+            }
+
+            /* File card (PDF / DOC / TXT) — flex-column so time row stacks at bottom */
+            .attach-card-file {
+                flex-direction: column;
+                background: #fff;
+                border: 1.5px solid #e5e7eb;
+                border-radius: 10px;
+            }
+            .attach-card-file.sent {
+                background: #eef0ff;
+                border-color: #c7d0f8;
+            }
+
+            /* Top row: icon + meta side by side */
+            .attach-card-top {
+                display: flex;
+                align-items: center;
+                width: 100%;
+            }
+
+            .attach-icon-wrap {
+                width: 52px;
+                min-width: 52px;
+                height: 60px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                background: rgba(0,0,0,0.03);
+                padding: 8px;
+                border-right: 1.5px solid rgba(0,0,0,0.06);
+                flex-shrink: 0;
+            }
+            .attach-icon-wrap svg {
+                width: 34px;
+                height: 34px;
+            }
+
+            .attach-card-body {
+                display: flex;
+                align-items: center;
+                flex: 1;
+                min-width: 0;
+            }
+
+            .attach-meta {
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+                gap: 5px;
+                padding: 8px 10px;
+                flex: 1;
+                min-width: 0;
+            }
+
+            .attach-name {
+                font-size: 13px;
+                font-weight: 600;
+                color: #1f2937;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                line-height: 1.3;
+            }
+            .attach-card-file.sent .attach-name { color: #2d3a8c; }
+
+            .attach-status-text {
+                font-size: 11px;
+                color: #9ca3af;
+                font-style: italic;
+            }
+
+            .attach-download-btn {
+                display: inline-flex;
+                align-items: center;
+                gap: 4px;
+                background: #667eea;
+                color: #fff;
+                border: none;
+                border-radius: 6px;
+                padding: 4px 10px;
+                font-size: 11px;
+                font-weight: 600;
+                cursor: pointer;
+                align-self: flex-start;
+                transition: background 0.2s;
+            }
+            .attach-download-btn:hover { background: #4f5ec7; }
+
+            /* Time row — INSIDE the card, pinned bottom-right */
+            .attach-footer {
+                display: flex;
+                justify-content: flex-end;
+                align-items: center;
+                gap: 4px;
+                padding: 0 8px 5px;
+            }
+            .attach-footer .message-time { margin: 0; padding: 0; }
+            .attach-card-file.sent .attach-footer .message-time { color: #667eea; }
+            .attach-card-file.sent .attach-footer .message-status { color: #667eea; }
+
+            /* Image card */
+            .attach-card-image {
+                flex-direction: column;
+                background: #000;
+                border: none;
+                cursor: pointer;
+                transition: opacity 0.2s;
+                max-width: 240px;
+                border-radius: 10px;
+            }
+            .attach-card-image:hover { opacity: 0.92; }
+
+            .attach-thumb {
+                width: 100%;
+                max-height: 200px;
+                object-fit: cover;
+                display: block;
+            }
+
+            .attach-card-footer {
+                padding: 5px 10px;
+                background: rgba(0,0,0,0.55);
+            }
+            .attach-card-image .attach-name {
+                font-size: 11px;
+                color: #e5e7eb;
+                font-weight: 500;
+            }
+            /* ===== LOAD MORE MESSAGES BANNER ===== */
+            #loadMoreBanner {
+                display: none;
+                flex-direction: column;
+                align-items: center;
+                gap: 8px;
+                padding: 10px 16px 14px;
+                background: rgba(255,255,255,0.85);
+                border-bottom: 1px solid rgba(0,0,0,0.06);
+                position: sticky;
+                top: 0;
+                z-index: 10;
+                backdrop-filter: blur(4px);
+            }
+            #loadMoreBanner .lm-label {
+                font-size: 12px;
+                color: #888;
+                font-weight: 500;
+            }
+            #loadMoreBanner .lm-buttons {
+                display: flex;
+                gap: 8px;
+            }
+            .lm-btn {
+                padding: 6px 14px;
+                border: none;
+                border-radius: 16px;
+                font-size: 12px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: opacity 0.15s;
+            }
+            .lm-btn:hover { opacity: 0.85; }
+            .lm-btn-more {
+                background: var(--primary-color);
+                color: #fff;
+            }
+            .lm-btn-date {
+                background: #fff;
+                color: var(--primary-color);
+                border: 1.5px solid var(--primary-color);
+            }
+            .lm-btn:disabled {
+                opacity: 0.45;
+                cursor: default;
+            }
+
+            /* ===== DATE FILTER MODAL ===== */
+            #dateFilterModal {
+                display: none;
+                position: fixed;
+                inset: 0;
+                z-index: 10100;
+                background: rgba(0,0,0,0.45);
+                align-items: center;
+                justify-content: center;
+            }
+            #dateFilterModal.show { display: flex; }
+            #dateFilterModal .dfm-box {
+                background: #fff;
+                border-radius: 14px;
+                padding: 24px 22px 18px;
+                width: 300px;
+                box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+            }
+            #dateFilterModal h3 {
+                margin: 0 0 6px;
+                font-size: 16px;
+                color: #1a1a2e;
+            }
+            #dateFilterModal p {
+                margin: 0 0 14px;
+                font-size: 13px;
+                color: #666;
+            }
+            #dateFilterModal input[type="date"] {
+                width: 100%;
+                padding: 9px 10px;
+                border: 1.5px solid #e0e0e0;
+                border-radius: 8px;
+                font-size: 14px;
+                box-sizing: border-box;
+                margin-bottom: 14px;
+                color: #333;
+            }
+            #dateFilterModal input[type="date"]:focus {
+                outline: none;
+                border-color: var(--primary-color);
+            }
+            #dateFilterModal .dfm-buttons {
+                display: flex;
+                gap: 8px;
+                justify-content: flex-end;
+            }
+            #dateFilterModal .dfm-cancel {
+                padding: 8px 16px;
+                border: 1.5px solid #e0e0e0;
+                border-radius: 8px;
+                background: #fff;
+                color: #666;
+                font-size: 13px;
+                font-weight: 600;
+                cursor: pointer;
+            }
+            #dateFilterModal .dfm-apply {
+                padding: 8px 16px;
+                border: none;
+                border-radius: 8px;
+                background: var(--primary-color);
+                color: #fff;
+                font-size: 13px;
+                font-weight: 600;
+                cursor: pointer;
+            }
+
+            /* ===== VIDEO CALL BUBBLE ===== */
+            .call-bubble-wrap {
+                display: flex;
+                margin: 6px 0;
+            }
+            .call-bubble-wrap.sent { justify-content: flex-end; }
+            .call-bubble-wrap.received { justify-content: flex-start; }
+
+            .call-bubble {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                padding: 8px 14px 6px;
+                border-radius: 10px;
+                max-width: 75%;
+                min-width: 180px;
+            }
+            .call-bubble-wrap.sent .call-bubble {
+                background: var(--sent-bg);
+                color: white;
+                border-radius: 8px 8px 0 8px;
+                flex-direction: row-reverse;
+                text-align: right;
+            }
+            .call-bubble-wrap.received .call-bubble {
+                background: white;
+                color: var(--text-dark);
+                border-radius: 8px 8px 8px 0;
+                box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+            }
+            .call-bubble-icon {
+                font-size: 20px;
+                flex-shrink: 0;
+            }
+            .call-bubble-info { flex: 1; min-width: 0; }
+            .call-bubble-label {
+                font-size: 14px;
+                font-weight: 600;
+                line-height: 1.3;
+            }
+            .call-bubble-wrap.sent .call-bubble-label { color: rgba(255,255,255,0.95); }
+            .call-bubble-wrap.received .call-bubble-label { color: #1a1a2e; }
+            .call-bubble-footer {
+                display: flex;
+                align-items: center;
+                justify-content: flex-end;
+                gap: 4px;
+                font-size: 11px;
+                margin-top: 3px;
+            }
+            .call-bubble-wrap.sent .call-bubble-footer { color: rgba(255,255,255,0.75); }
+            .call-bubble-wrap.received .call-bubble-footer { color: #667; }
+
+            /* ===== PENDING APPROVAL MODAL ===== */
+            #pendingApprovalModal {
+                display: none;
+                position: fixed;
+                inset: 0;
+                background: rgba(0,0,0,0.55);
+                z-index: 8000;
+                align-items: center;
+                justify-content: center;
+            }
+            #pendingApprovalModal.show { display: flex; }
+            .approval-card {
+                background: #fff;
+                border-radius: 18px;
+                padding: 36px 32px 28px;
+                max-width: 360px;
+                width: 90%;
+                text-align: center;
+                box-shadow: 0 8px 40px rgba(0,0,0,0.18);
+            }
+            .approval-icon {
+                font-size: 52px;
+                margin-bottom: 12px;
+            }
+            .approval-card h2 {
+                font-size: 20px;
+                font-weight: 700;
+                color: #1f2937;
+                margin-bottom: 10px;
+            }
+            .approval-card p {
+                font-size: 14px;
+                color: #6b7280;
+                line-height: 1.6;
+                margin-bottom: 24px;
+            }
+            .approval-card .btn-primary {
+                width: 100%;
+            }
+
+            /* ===== ADMIN PENDING USERS SECTION ===== */
+            .pending-users-section {
+                margin-top: 20px;
+                border-top: 1px solid #e5e7eb;
+                padding-top: 16px;
+            }
+            .pending-users-section h3 {
+                font-size: 14px;
+                font-weight: 700;
+                color: #374151;
+                margin-bottom: 10px;
+            }
+            #pendingUsersList {
+                max-height: 200px;
+                overflow-y: auto;
+            }
+            .pending-user-row {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                padding: 8px 10px;
+                border-radius: 8px;
+                background: #f9fafb;
+                margin-bottom: 6px;
+                border: 1px solid #e5e7eb;
+            }
+            .pending-user-info {
+                display: flex;
+                flex-direction: column;
+            }
+            .pending-user-name {
+                font-size: 13px;
+                font-weight: 600;
+                color: #1f2937;
+            }
+            .pending-user-email {
+                font-size: 11px;
+                color: #9ca3af;
+                margin-top: 1px;
+            }
+            .approve-btn {
+                background: #10b981;
+                color: #fff;
+                border: none;
+                border-radius: 6px;
+                padding: 5px 12px;
+                font-size: 12px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: background 0.2s;
+                white-space: nowrap;
+            }
+            .approve-btn:hover { background: #059669; }
+            .approve-btn:disabled {
+                background: #d1fae5;
+                color: #6ee7b7;
+                cursor: default;
+            }
+            .no-pending-msg {
+                font-size: 13px;
+                color: #9ca3af;
+                text-align: center;
+                padding: 12px 0;
+                font-style: italic;
+            }
+
+            /* ===== DB BACKUP / RESTORE MODAL ===== */
+            #dbBackupModal .modal-content {
+                max-width: 480px;
+            }
+            .db-section {
+                margin-top: 18px;
+                border-top: 1px solid #e5e7eb;
+                padding-top: 14px;
+            }
+            .db-section h3 {
+                font-size: 13px;
+                font-weight: 700;
+                color: #374151;
+                margin-bottom: 10px;
+            }
+            .db-password-row {
+                display: flex;
+                gap: 8px;
+                align-items: center;
+                margin-bottom: 10px;
+            }
+            .db-password-row input {
+                flex: 1;
+            }
+            .db-action-btn {
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: #fff;
+                border: none;
+                border-radius: 8px;
+                padding: 9px 16px;
+                font-size: 13px;
+                font-weight: 600;
+                cursor: pointer;
+                white-space: nowrap;
+                transition: opacity .2s;
+            }
+            .db-action-btn:disabled { opacity: .55; cursor: default; }
+            .db-action-btn.danger {
+                background: linear-gradient(135deg, #e53e3e 0%, #9b2335 100%);
+            }
+            .db-action-btn.neutral {
+                background: linear-gradient(135deg, #0ea5e9 0%, #0369a1 100%);
+            }
+            .db-log {
+                background: #0f172a;
+                color: #86efac;
+                font-family: 'Courier New', monospace;
+                font-size: 11.5px;
+                border-radius: 8px;
+                padding: 10px 12px;
+                max-height: 180px;
+                overflow-y: auto;
+                margin-top: 10px;
+                display: none;
+                line-height: 1.6;
+            }
+            .db-log.visible { display: block; }
+            .db-log .log-ok   { color: #86efac; }
+            .db-log .log-warn { color: #fde047; }
+            .db-log .log-err  { color: #fca5a5; }
+            .db-log .log-info { color: #7dd3fc; }
+            .db-upload-label {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                background: #f3f4f6;
+                border: 1.5px dashed #d1d5db;
+                border-radius: 8px;
+                padding: 10px 14px;
+                cursor: pointer;
+                font-size: 13px;
+                color: #6b7280;
+                transition: border-color .2s;
+                margin-bottom: 8px;
+            }
+            .db-upload-label:hover { border-color: #667eea; color: #667eea; }
+            .db-upload-label input[type="file"] { display: none; }
+            #dbRestoreFilename,
+            #dbDecryptFilename {
+                font-size: 12px;
+                color: #374151;
+                font-weight: 600;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                max-width: 240px;
+            }
+
+
+            /* ===== PASSWORD CHANGE MODAL ===== */
+            .modal-overlay {
+                display: none;
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background: rgba(0, 0, 0, 0.5);
+                z-index: 2000;
+                align-items: center;
+                justify-content: center;
+                padding: 20px;
+            }
+
+            .modal-overlay.show {
+                display: flex;
+            }
+
+            .modal-content {
+                background: white;
+                padding: 30px;
+                border-radius: 20px;
+                width: 100%;
+                max-width: 400px;
+                box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+            }
+
+            .modal-content h2 {
+                margin-bottom: 20px;
+                color: var(--text-dark);
+            }
+
+            .modal-buttons {
+                display: flex;
+                gap: 10px;
+                margin-top: 20px;
+            }
+
+            .modal-buttons button {
+                flex: 1;
+                padding: 12px;
+                border: none;
+                border-radius: 10px;
+                font-size: 15px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: transform 0.2s;
+            }
+
+            .btn-primary {
+                background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
+                color: white;
+            }
+
+            .btn-secondary {
+                background: #e1e8ed;
+                color: var(--text-dark);
+            }
+
+            /* ===== MOBILE RESPONSIVENESS ===== */
+            @media (max-width: 480px) {
+                .chat-container {
+                    max-width: 100%;
+                }
+
+                .message-bubble {
+                    max-width: 85%;
+                }
+            }
+
+            /* ===== LOADING SPINNER ===== */
+            .spinner {
+                display: inline-block;
+                width: 16px;
+                height: 16px;
+                border: 2px solid rgba(255, 255, 255, 0.3);
+                border-radius: 50%;
+                border-top-color: white;
+                animation: spin 0.8s linear infinite;
+            }
+
+            @keyframes spin {
+                to {
+                    transform: rotate(360deg);
+                }
+            }
+
+            /* Hide scrollbar for chat messages */
+            .messages-area::-webkit-scrollbar {
+                width: 6px;
+            }
+
+            .messages-area::-webkit-scrollbar-track {
+                background: transparent;
+            }
+
+            .messages-area::-webkit-scrollbar-thumb {
+                background: rgba(0, 0, 0, 0.2);
+                border-radius: 3px;
+            }
+
+            /* ===== OTP Verification Page Styling ===== */
+            .otp-page {
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                min-height: 100vh;
+                background-color: #f8fafc; /* gray-100 */
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                z-index: 50;
+            }
+
+            .otp-container {
+                animation: fadeIn 0.25s ease-out;
+            }
+
+            .otp-input {
+                font-family: 'Courier New', monospace;
+                letter-spacing: 6px;
+                text-transform: uppercase;
+            }
+
+            /* Subtle fade animation */
+            @keyframes fadeIn {
+                from {
+                    opacity: 0;
+                    transform: translateY(10px);
+                }
+                to {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+            }
+
+            /* Status message styling */
+            #resendOtpBtn[disabled] {
+                pointer-events: none;
+                opacity: 0.5;
+                cursor: not-allowed;
+            }
+
+            .status-message {
+                transition: color 0.2s ease, opacity 0.2s ease;
+            }
+
+            .status-message.error {
+                color: #dc2626; /* red‑600 */
+            }
+
+            .status-message.success {
+                color: #16a34a; /* green‑600 */
+            }
+
+        </style>
+    </head>
+    <body>
+    <!-- Login/Register Screen -->
+    <div id="authScreen" class="login-container">
+        <div class="login-box">
+            <h1>🔐 SecureChat</h1>
+            <p class="subtitle">End-to-End Encrypted Messaging</p>
+
+            <div class="tab-switcher">
+                <button class="tab-btn active" id="loginTab">Login</button>
+                <button class="tab-btn" id="registerTab">Register</button>
             </div>
-            <div class="input-group">
-                <label>Password</label>
-                <input type="password" id="loginPassword" placeholder="Enter your password"
-                       autocomplete="current-password">
-            </div>
-            <button class="submit-btn" id="loginBtn">
-                Login
-            </button>
-        </div>
 
-        <!-- Register Form -->
-        <div id="registerForm" class="form-container">
-            <div class="input-group">
-                <label>Username</label>
-                <input type="text" id="registerUsername" placeholder="Choose a username" autocomplete="username">
-            </div>
-            <div class="input-group">
-                <label>Password</label>
-                <input type="password" id="registerPassword" placeholder="Min 12 chars, upper, lower, number, special (!@#$%…)"
-                       autocomplete="new-password">
-            </div>
-            <div class="input-group">
-                <label>Confirm Password</label>
-                <input type="password" id="registerConfirm" placeholder="Confirm your password"
-                       autocomplete="new-password">
-            </div>
-            <div class="input-group">
-                <label>Email</label>
-                <input id="registerEmail" type="email" placeholder="Email address" required/>
-            </div>
-            <button class="submit-btn" id="registerBtn">
-                Create Account
-            </button>
-        </div>
-
-        <div id="authStatus" class="status-message"></div>
-    </div>
-</div>
-
-<!-- Main Chat Container -->
-<div id="chatContainer" class="chat-container">
-    <!-- User List Page -->
-    <div id="userListPage" class="user-list-page">
-        <div class="header">
-            <h2>SecureChat</h2>
-            <div class="header-icons">
-                <button id="settingsBtn">⋮</button>
-            </div>
-        </div>
-
-        <!-- Settings Menu -->
-        <div id="settingsMenu" class="settings-menu">
-            <div class="settings-item" id="profileMenuBtn">Profile</div>
-            <div class="settings-item" id="settingsMenuBtn">Settings</div>
-            <div class="settings-item" id="changePasswordMenuBtn">Change Password</div>
-            <div class="settings-item" id="adminMenuBtn" style="display:none;">Admin Settings</div>
-            <div class="settings-item" id="dbBackupMenuBtn" style="display:none;">DB Backup &amp; Restore</div>
-            <div class="settings-item" id="logoutMenuBtn">Logout</div>
-        </div>
-
-        <div class="search-bar">
-            <input type="text" id="userSearch" placeholder="Search contacts...">
-        </div>
-
-        <div id="usersList" class="users-list">
-            <!-- Users will be populated here -->
-        </div>
-    </div>
-
-    <!-- Chat Page -->
-    <div id="chatPage" class="chat-page">
-        <div class="chat-header">
-            <div class="chat-header-left">
-                <button class="back-btn" id="backBtn">←</button>
-                <div class="chat-user-avatar" id="chatUserAvatar"></div>
-                <div class="chat-user-info">
-                    <h3 id="chatUserName"></h3>
-                    <div class="chat-user-status" id="chatUserStatus">
-                        🔐 End-to-end encrypted
-                    </div>
+            <!-- Login Form -->
+            <div id="loginForm" class="form-container active">
+                <div class="input-group">
+                    <label>Username</label>
+                    <input type="text" id="loginUsername" placeholder="Enter your username" autocomplete="username">
                 </div>
-            </div>
-            <div class="chat-header-right">
-                <button id="startVideoCallBtn">📹</button>
-                <button id="chatSettingsBtn">⋮</button>
-            </div>
-        </div>
-
-        <!-- Chat Settings Menu -->
-        <div id="chatSettingsMenu" class="settings-menu">
-            <div class="settings-item" id="contactInfoBtn">Contact Info</div>
-            <div class="settings-item" id="muteBtn">Mute</div>
-            <div class="settings-item" id="clearChatBtn">Clear Chat</div>
-            <div class="settings-item" id="blockBtn">Block</div>
-        </div>
-
-        <div id="typingIndicator" class="typing-indicator">
-            <span id="typingUser"></span> is typing...
-        </div>
-
-        <div id="messagesArea" class="messages-area">
-            <!-- Messages will be populated here -->
-        </div>
-
-        <div class="input-area">
-            <button class="attach-btn" id="attachBtn">📎</button>
-            <button class="emoji-btn" id="emojiBtn">😊</button>
-            <textarea
-                    id="messageInput"
-                    class="message-input"
-                    placeholder="Message"
-                    rows="1"
-            ></textarea>
-            <button class="send-btn" id="sendBtn">➤</button>
-        </div>
-        <!-- Attachment Menu -->
-        <div class="attachment-menu" id="attachmentMenu">
-            <div class="attachment-item" id="attachDoc">
-                <div class="attachment-icon document">📄</div>
-                <div class="attachment-label">Document</div>
-            </div>
-            <div class="attachment-item" id="attachCamera">
-                <div class="attachment-icon camera">📷</div>
-                <div class="attachment-label">Camera</div>
-            </div>
-            <div class="attachment-item" id="attachGallery">
-                <div class="attachment-icon gallery">🖼️</div>
-                <div class="attachment-label">Gallery</div>
-            </div>
-            <div class="attachment-item" id="attachLocation">
-                <div class="attachment-icon location">📍</div>
-                <div class="attachment-label">Location</div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Change Password Modal -->
-<div id="passwordModal" class="modal-overlay">
-    <div class="modal-content">
-        <h2>Change Password</h2>
-        <div class="input-group">
-            <label>Current Password</label>
-            <input type="password" id="oldPassword" placeholder="Enter current password">
-        </div>
-        <div class="input-group">
-            <label>New Password</label>
-            <input type="password" id="newPassword" placeholder="Min 12 chars, upper, lower, number, special (!@#$%…)">
-        </div>
-        <div class="input-group">
-            <label>Confirm New Password</label>
-            <input type="password" id="confirmNewPassword" placeholder="Confirm new password">
-        </div>
-        <div id="passwordStatus" class="status-message"></div>
-        <div class="modal-buttons">
-            <button class="btn-secondary" id="cancelPasswordBtn">Cancel</button>
-            <button class="btn-primary" id="updatePasswordBtn">Update</button>
-        </div>
-    </div>
-</div>
-
-<!-- ==================== SESSION RESTORE PASSWORD MODAL ==================== -->
-<div id="restoreSessionModal" class="modal-overlay">
-    <div class="modal-content">
-        <h2>Restore Session</h2>
-        <p>Please enter your password to restore your session.</p>
-
-        <div class="input-group">
-            <input type="password" id="restoreSessionPasswordInput" placeholder="Enter your password">
-        </div>
-
-        <div id="restoreSessionStatus" class="status-message"></div>
-
-        <div class="modal-buttons">
-            <button id="restoreSessionCancelBtn" class="btn-secondary">Cancel</button>
-            <button id="restoreSessionSubmitBtn" class="btn-primary">Unlock</button>
-        </div>
-    </div>
-</div>
-
-<!-- ==================== OTP VERIFICATION PAGE ==================== -->
-<div id="otpPage" class="modal-overlay">
-    <div class="modal-content">
-        <h2>Verify Your Email</h2>
-        <p>
-            We’ve sent a 6‑digit verification code to your email. Please enter it below to complete registration.
-        </p>
-        <div class="input-group">
-            <label>OTP</label>
-            <input id="otpInput" class="input-group" maxlength="6" placeholder="Enter OTP"/>
-        </div>
-        <div class="modal-buttons">
-            <button id="verifyOtpBtn" class="btn-primary">Verify</button>
-        </div>
-
-        <div id="otpStatus" class="status-message"></div>
-
-        <div class="modal-buttons">
-            <button id="resendOtpBtn" class="btn-secondary">Resend Code</button>
-        </div>
-        <p class="subtitle">Didn’t get the code? Check your spam folder.</p>
-    </div>
-</div>
-
-
-<!-- Admin Settings Modal -->
-<div id="adminSettingsModal" class="modal-overlay">
-    <div class="modal-content">
-        <h2>⚙️ Admin Settings</h2>
-        <p style="color:#666;font-size:13px;margin-bottom:16px;">
-            Configure maximum file sizes for attachments. Changes apply immediately to all users.
-        </p>
-
-        <div class="input-group">
-            <label>Max Image Size (MB) — JPEG &amp; PNG</label>
-            <input type="number" id="adminMaxImageSize" min="1" max="100" value="5"
-                   placeholder="e.g. 5">
-        </div>
-        <div class="input-group">
-            <label>Max File Size (MB) — DOC, TXT, PDF</label>
-            <input type="number" id="adminMaxFileSize" min="1" max="100" value="10"
-                   placeholder="e.g. 10">
-        </div>
-
-        <div id="adminSettingsStatus" class="status-message"></div>
-
-        <div class="modal-buttons">
-            <button class="btn-secondary" id="cancelAdminSettingsBtn">Cancel</button>
-            <button class="btn-primary" id="saveAdminSettingsBtn">Save</button>
-        </div>
-
-        <!-- Pending user approvals section -->
-        <div class="pending-users-section">
-            <h3>👥 Pending User Approvals</h3>
-            <div id="pendingUsersList">
-                <p class="no-pending-msg">Loading...</p>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- DB Backup / Restore Modal -->
-<div id="dbBackupModal" class="modal-overlay">
-    <div class="modal-content" style="max-width:480px;">
-        <h2>🗄️ Database Backup &amp; Restore</h2>
-        <p style="color:#666;font-size:13px;margin-bottom:4px;">
-            All operations require your admin password to authorise.
-            The dump is AES-256 encrypted in your browser before it ever leaves — the
-            server never sees your backup password.
-        </p>
-
-        <!-- ── SECTION 1: DOWNLOAD / DUMP ── -->
-        <div class="db-section">
-            <h3>⬇ Download Database Dump</h3>
-            <div class="db-password-row">
-                <input type="password" id="dbDumpPassword"
-                       placeholder="Backup encryption password (≥8 chars)" autocomplete="new-password">
-                <button class="db-action-btn" id="dbDumpBtn">Download</button>
-            </div>
-            <div id="dbDumpLog" class="db-log"></div>
-        </div>
-
-        <!-- ── SECTION 2: DECRYPT TO DISK (offline inspection) ── -->
-        <div class="db-section">
-            <h3>🔓 Decrypt Backup to Raw Dump</h3>
-            <p style="color:#888;font-size:12px;margin-bottom:8px;">
-                Decrypts a <code>.enc</code> file locally in your browser and saves the
-                raw <code>.sql.gz</code> or <code>.db.gz</code> to your disk.
-                Completely offline — no server contact needed.
-            </p>
-            <label class="db-upload-label">
-                <span>📂</span>
-                <span id="dbDecryptFilename">Choose .enc backup file…</span>
-                <input type="file" id="dbDecryptFile" accept=".enc">
-            </label>
-            <div class="db-password-row">
-                <input type="password" id="dbDecryptPassword"
-                       placeholder="Backup encryption password"
-                       autocomplete="new-password">
-                <button class="db-action-btn neutral" id="dbDecryptBtn" disabled>
-                    Decrypt &amp; Save
+                <div class="input-group">
+                    <label>Password</label>
+                    <input type="password" id="loginPassword" placeholder="Enter your password"
+                           autocomplete="current-password">
+                </div>
+                <button class="submit-btn" id="loginBtn">
+                    Login
                 </button>
             </div>
-            <div id="dbDecryptLog" class="db-log"></div>
-        </div>
 
-        <!-- ── SECTION 3: RESTORE (upload to server) ── -->
-        <div class="db-section">
-            <h3>⬆ Restore from Dump</h3>
-            <p style="color:#888;font-size:12px;margin-bottom:8px;">
-                Decrypts the <code>.enc</code> file locally, then uploads the raw dump
-                to the server to overwrite the live database.
-            </p>
-            <label class="db-upload-label">
-                <span>📂</span>
-                <span id="dbRestoreFilename">Choose encrypted dump .enc file…</span>
-                <input type="file" id="dbRestoreFile" accept=".enc">
-            </label>
-            <div class="db-password-row">
-                <input type="password" id="dbRestorePassword"
-                       placeholder="Backup encryption password" autocomplete="new-password">
-                <button class="db-action-btn danger" id="dbRestoreBtn" disabled>Restore</button>
+            <!-- Register Form -->
+            <div id="registerForm" class="form-container">
+                <div class="input-group">
+                    <label>Username</label>
+                    <input type="text" id="registerUsername" placeholder="Choose a username" autocomplete="username">
+                </div>
+                <div class="input-group">
+                    <label>Password</label>
+                    <input type="password" id="registerPassword" placeholder="Min 12 chars, upper, lower, number, special (!@#$%…)"
+                           autocomplete="new-password">
+                </div>
+                <div class="input-group">
+                    <label>Confirm Password</label>
+                    <input type="password" id="registerConfirm" placeholder="Confirm your password"
+                           autocomplete="new-password">
+                </div>
+                <div class="input-group">
+                    <label>Email</label>
+                    <input id="registerEmail" type="email" placeholder="Email address" required/>
+                </div>
+                <button class="submit-btn" id="registerBtn">
+                    Create Account
+                </button>
             </div>
-            <div id="dbRestoreLog" class="db-log"></div>
-        </div>
 
-        <div class="modal-buttons" style="margin-top:22px;">
-            <button class="btn-secondary" id="closeDbBackupModalBtn">Close</button>
+            <div id="authStatus" class="status-message"></div>
         </div>
     </div>
-</div>
 
+    <!-- Main Chat Container -->
+    <div id="chatContainer" class="chat-container">
+        <!-- User List Page -->
+        <div id="userListPage" class="user-list-page">
+            <div class="header">
+                <h2>SecureChat</h2>
+                <div class="header-icons">
+                    <button id="settingsBtn">⋮</button>
+                </div>
+            </div>
 
-<!-- Pending Approval Modal -->
-<div id="pendingApprovalModal" class="modal-overlay">
-    <div class="modal-content">
-        <h2>⏳ Awaiting Approval</h2>
-        <p style="color:#555; font-size:14px; margin-bottom:20px; line-height:1.5;">
-            Your account has been verified but is pending admin approval.
-            You will be able to log in once an administrator approves your account.
-        </p>
-        <div class="modal-buttons">
-            <button class="btn-primary" id="pendingApprovalOkBtn">OK</button>
+            <!-- Settings Menu -->
+            <div id="settingsMenu" class="settings-menu">
+                <div class="settings-item" id="profileMenuBtn">Profile</div>
+                <div class="settings-item" id="settingsMenuBtn">Settings</div>
+                <div class="settings-item" id="changePasswordMenuBtn">Change Password</div>
+                <div class="settings-item" id="adminMenuBtn" style="display:none;">Admin Settings</div>
+                <div class="settings-item" id="dbBackupMenuBtn" style="display:none;">DB Backup &amp; Restore</div>
+                <div class="settings-item" id="logoutMenuBtn">Logout</div>
+            </div>
+
+            <div class="search-bar">
+                <input type="text" id="userSearch" placeholder="Search contacts...">
+            </div>
+
+            <div id="usersList" class="users-list">
+                <!-- Users will be populated here -->
+            </div>
+        </div>
+
+        <!-- Chat Page -->
+        <div id="chatPage" class="chat-page">
+            <div class="chat-header">
+                <div class="chat-header-left">
+                    <button class="back-btn" id="backBtn">←</button>
+                    <div class="chat-user-avatar" id="chatUserAvatar"></div>
+                    <div class="chat-user-info">
+                        <h3 id="chatUserName"></h3>
+                        <div class="chat-user-status" id="chatUserStatus">
+                            🔐 End-to-end encrypted
+                        </div>
+                    </div>
+                </div>
+                <div class="chat-header-right">
+                    <button id="startVideoCallBtn">📹</button>
+                    <button id="chatSettingsBtn">⋮</button>
+                </div>
+            </div>
+
+            <!-- Chat Settings Menu -->
+            <div id="chatSettingsMenu" class="settings-menu">
+                <div class="settings-item" id="contactInfoBtn">Contact Info</div>
+                <div class="settings-item" id="muteBtn">Mute</div>
+                <div class="settings-item" id="clearChatBtn">Clear Chat</div>
+                <div class="settings-item" id="blockBtn">Block</div>
+            </div>
+
+            <div id="typingIndicator" class="typing-indicator">
+                <span id="typingUser"></span> is typing...
+            </div>
+            <!-- Load more messages banner — shown when older messages exist -->
+            <div id="loadMoreBanner">
+                <span class="lm-label">Older messages available</span>
+                <div class="lm-buttons">
+                    <button id="loadMoreBtn" class="lm-btn lm-btn-more">⬆ Load 10 more</button>
+                    <button id="loadByDateBtn" class="lm-btn lm-btn-date">📅 Load until date</button>
+                </div>
+            </div>
+            <div id="messagesArea" class="messages-area">
+                <!-- Messages will be populated here -->
+            </div>
+
+            <div class="input-area">
+                <button class="attach-btn" id="attachBtn">📎</button>
+                <button class="emoji-btn" id="emojiBtn">😊</button>
+                <textarea
+                        id="messageInput"
+                        class="message-input"
+                        placeholder="Message"
+                        rows="1"
+                ></textarea>
+                <button class="send-btn" id="sendBtn">➤</button>
+            </div>
+            <!-- Attachment Menu -->
+            <div class="attachment-menu" id="attachmentMenu">
+                <div class="attachment-item" id="attachDoc">
+                    <div class="attachment-icon document">📄</div>
+                    <div class="attachment-label">Document</div>
+                </div>
+                <div class="attachment-item" id="attachCamera">
+                    <div class="attachment-icon camera">📷</div>
+                    <div class="attachment-label">Camera</div>
+                </div>
+                <div class="attachment-item" id="attachGallery">
+                    <div class="attachment-icon gallery">🖼️</div>
+                    <div class="attachment-label">Gallery</div>
+                </div>
+                <div class="attachment-item" id="attachLocation">
+                    <div class="attachment-icon location">📍</div>
+                    <div class="attachment-label">Location</div>
+                </div>
+            </div>
         </div>
     </div>
-</div>
 
-<!-- ==================== VIDEO CALL MODALS ==================== -->
+    <!-- Change Password Modal -->
+    <div id="passwordModal" class="modal-overlay">
+        <div class="modal-content">
+            <h2>Change Password</h2>
+            <div class="input-group">
+                <label>Current Password</label>
+                <input type="password" id="oldPassword" placeholder="Enter current password">
+            </div>
+            <div class="input-group">
+                <label>New Password</label>
+                <input type="password" id="newPassword" placeholder="Min 12 chars, upper, lower, number, special (!@#$%…)">
+            </div>
+            <div class="input-group">
+                <label>Confirm New Password</label>
+                <input type="password" id="confirmNewPassword" placeholder="Confirm new password">
+            </div>
+            <div id="passwordStatus" class="status-message"></div>
+            <div class="modal-buttons">
+                <button class="btn-secondary" id="cancelPasswordBtn">Cancel</button>
+                <button class="btn-primary" id="updatePasswordBtn">Update</button>
+            </div>
+        </div>
+    </div>
 
-<!-- Outgoing Call Modal (Caller sees this) -->
-<div id="outgoingCallModal" style="display:none; position:fixed; inset:0; z-index:10000;
-     background:linear-gradient(160deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%);
-     flex-direction:column; align-items:center; justify-content:center; color:#fff;">
-  <div style="text-align:center; margin-bottom:40px;">
-    <div id="outgoingCallAvatar" style="width:90px;height:90px;border-radius:50%;
-         background:linear-gradient(135deg,#667eea,#764ba2); display:flex;
-         align-items:center; justify-content:center; font-size:32px; font-weight:700;
-         margin:0 auto 16px; box-shadow:0 0 0 6px rgba(102,126,234,0.25),0 0 0 12px rgba(102,126,234,0.1);
-         animation:callPulse 1.5s ease-in-out infinite;"></div>
-    <h2 id="outgoingCallName" style="font-size:22px;font-weight:600;margin:0 0 8px;"></h2>
-    <p style="color:#aab;font-size:15px;margin:0;">Calling…</p>
-  </div>
-  <button id="cancelOutgoingCallBtn"
-          style="width:64px;height:64px;border-radius:50%;background:#e53e3e;border:none;
-                 cursor:pointer;font-size:26px;display:flex;align-items:center;justify-content:center;
-                 box-shadow:0 4px 20px rgba(229,62,62,0.5);transition:transform .15s;">
-    📵
-  </button>
-</div>
+    <!-- ==================== SESSION RESTORE PASSWORD MODAL ==================== -->
+    <div id="restoreSessionModal" class="modal-overlay">
+        <div class="modal-content">
+            <h2>Restore Session</h2>
+            <p>Please enter your password to restore your session.</p>
 
-<!-- Incoming Call Modal (Callee sees this) -->
-<div id="incomingCallModal" style="display:none; position:fixed; inset:0; z-index:10000;
-     background:linear-gradient(160deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%);
-     flex-direction:column; align-items:center; justify-content:center; color:#fff;">
-  <div style="text-align:center; margin-bottom:48px;">
-    <div id="incomingCallAvatar" style="width:90px;height:90px;border-radius:50%;
-         background:linear-gradient(135deg,#667eea,#764ba2); display:flex;
-         align-items:center; justify-content:center; font-size:32px; font-weight:700;
-         margin:0 auto 16px; box-shadow:0 0 0 6px rgba(102,126,234,0.25),0 0 0 12px rgba(102,126,234,0.1);
-         animation:callPulse 1.5s ease-in-out infinite;"></div>
-    <h2 id="incomingCallName" style="font-size:22px;font-weight:600;margin:0 0 8px;"></h2>
-    <p style="color:#aab;font-size:15px;margin:0;">Incoming Video Call…</p>
-  </div>
-  <div style="display:flex;gap:48px;">
-    <div style="text-align:center;">
-      <button id="declineCallBtn"
+            <div class="input-group">
+                <input type="password" id="restoreSessionPasswordInput" placeholder="Enter your password">
+            </div>
+
+            <div id="restoreSessionStatus" class="status-message"></div>
+
+            <div class="modal-buttons">
+                <button id="restoreSessionCancelBtn" class="btn-secondary">Cancel</button>
+                <button id="restoreSessionSubmitBtn" class="btn-primary">Unlock</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== OTP VERIFICATION PAGE ==================== -->
+    <div id="otpPage" class="modal-overlay">
+        <div class="modal-content">
+            <h2>Verify Your Email</h2>
+            <p>
+                We’ve sent a 6‑digit verification code to your email. Please enter it below to complete registration.
+            </p>
+            <div class="input-group">
+                <label>OTP</label>
+                <input id="otpInput" class="input-group" maxlength="6" placeholder="Enter OTP"/>
+            </div>
+            <div class="modal-buttons">
+                <button id="verifyOtpBtn" class="btn-primary">Verify</button>
+            </div>
+
+            <div id="otpStatus" class="status-message"></div>
+
+            <div class="modal-buttons">
+                <button id="resendOtpBtn" class="btn-secondary">Resend Code</button>
+            </div>
+            <p class="subtitle">Didn’t get the code? Check your spam folder.</p>
+        </div>
+    </div>
+
+
+    <!-- Admin Settings Modal -->
+    <div id="adminSettingsModal" class="modal-overlay">
+        <div class="modal-content">
+            <h2>⚙️ Admin Settings</h2>
+            <p style="color:#666;font-size:13px;margin-bottom:16px;">
+                Configure maximum file sizes for attachments. Changes apply immediately to all users.
+            </p>
+
+            <div class="input-group">
+                <label>Max Image Size (MB) — JPEG &amp; PNG</label>
+                <input type="number" id="adminMaxImageSize" min="1" max="100" value="5"
+                       placeholder="e.g. 5">
+            </div>
+            <div class="input-group">
+                <label>Max File Size (MB) — DOC, TXT, PDF</label>
+                <input type="number" id="adminMaxFileSize" min="1" max="100" value="10"
+                       placeholder="e.g. 10">
+            </div>
+
+            <div id="adminSettingsStatus" class="status-message"></div>
+
+            <div class="modal-buttons">
+                <button class="btn-secondary" id="cancelAdminSettingsBtn">Cancel</button>
+                <button class="btn-primary" id="saveAdminSettingsBtn">Save</button>
+            </div>
+
+            <!-- Pending user approvals section -->
+            <div class="pending-users-section">
+                <h3>👥 Pending User Approvals</h3>
+                <div id="pendingUsersList">
+                    <p class="no-pending-msg">Loading...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- DB Backup / Restore Modal -->
+    <div id="dbBackupModal" class="modal-overlay">
+        <div class="modal-content" style="max-width:480px;">
+            <h2>🗄️ Database Backup &amp; Restore</h2>
+            <p style="color:#666;font-size:13px;margin-bottom:4px;">
+                All operations require your admin password to authorise.
+                The dump is AES-256 encrypted in your browser before it ever leaves — the
+                server never sees your backup password.
+            </p>
+
+            <!-- ── SECTION 1: DOWNLOAD / DUMP ── -->
+            <div class="db-section">
+                <h3>⬇ Download Database Dump</h3>
+                <div class="db-password-row">
+                    <input type="password" id="dbDumpPassword"
+                           placeholder="Backup encryption password (≥8 chars)" autocomplete="new-password">
+                    <button class="db-action-btn" id="dbDumpBtn">Download</button>
+                </div>
+                <div id="dbDumpLog" class="db-log"></div>
+            </div>
+
+            <!-- ── SECTION 2: DECRYPT TO DISK (offline inspection) ── -->
+            <div class="db-section">
+                <h3>🔓 Decrypt Backup to Raw Dump</h3>
+                <p style="color:#888;font-size:12px;margin-bottom:8px;">
+                    Decrypts a <code>.enc</code> file locally in your browser and saves the
+                    raw <code>.sql.gz</code> or <code>.db.gz</code> to your disk.
+                    Completely offline — no server contact needed.
+                </p>
+                <label class="db-upload-label">
+                    <span>📂</span>
+                    <span id="dbDecryptFilename">Choose .enc backup file…</span>
+                    <input type="file" id="dbDecryptFile" accept=".enc">
+                </label>
+                <div class="db-password-row">
+                    <input type="password" id="dbDecryptPassword"
+                           placeholder="Backup encryption password"
+                           autocomplete="new-password">
+                    <button class="db-action-btn neutral" id="dbDecryptBtn" disabled>
+                        Decrypt &amp; Save
+                    </button>
+                </div>
+                <div id="dbDecryptLog" class="db-log"></div>
+            </div>
+
+            <!-- ── SECTION 3: RESTORE (upload to server) ── -->
+            <div class="db-section">
+                <h3>⬆ Restore from Dump</h3>
+                <p style="color:#888;font-size:12px;margin-bottom:8px;">
+                    Decrypts the <code>.enc</code> file locally, then uploads the raw dump
+                    to the server to overwrite the live database.
+                </p>
+                <label class="db-upload-label">
+                    <span>📂</span>
+                    <span id="dbRestoreFilename">Choose encrypted dump .enc file…</span>
+                    <input type="file" id="dbRestoreFile" accept=".enc">
+                </label>
+                <div class="db-password-row">
+                    <input type="password" id="dbRestorePassword"
+                           placeholder="Backup encryption password" autocomplete="new-password">
+                    <button class="db-action-btn danger" id="dbRestoreBtn" disabled>Restore</button>
+                </div>
+                <div id="dbRestoreLog" class="db-log"></div>
+            </div>
+
+            <div class="modal-buttons" style="margin-top:22px;">
+                <button class="btn-secondary" id="closeDbBackupModalBtn">Close</button>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- Pending Approval Modal -->
+    <div id="pendingApprovalModal" class="modal-overlay">
+        <div class="modal-content">
+            <h2>⏳ Awaiting Approval</h2>
+            <p style="color:#555; font-size:14px; margin-bottom:20px; line-height:1.5;">
+                Your account has been verified but is pending admin approval.
+                You will be able to log in once an administrator approves your account.
+            </p>
+            <div class="modal-buttons">
+                <button class="btn-primary" id="pendingApprovalOkBtn">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== VIDEO CALL MODALS ==================== -->
+
+    <!-- Outgoing Call Modal (Caller sees this) -->
+    <div id="outgoingCallModal" style="display:none; position:fixed; inset:0; z-index:10000;
+         background:linear-gradient(160deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%);
+         flex-direction:column; align-items:center; justify-content:center; color:#fff;">
+      <div style="text-align:center; margin-bottom:40px;">
+        <div id="outgoingCallAvatar" style="width:90px;height:90px;border-radius:50%;
+             background:linear-gradient(135deg,#667eea,#764ba2); display:flex;
+             align-items:center; justify-content:center; font-size:32px; font-weight:700;
+             margin:0 auto 16px; box-shadow:0 0 0 6px rgba(102,126,234,0.25),0 0 0 12px rgba(102,126,234,0.1);
+             animation:callPulse 1.5s ease-in-out infinite;"></div>
+        <h2 id="outgoingCallName" style="font-size:22px;font-weight:600;margin:0 0 8px;"></h2>
+        <p style="color:#aab;font-size:15px;margin:0;">Calling…</p>
+      </div>
+      <button id="cancelOutgoingCallBtn"
               style="width:64px;height:64px;border-radius:50%;background:#e53e3e;border:none;
                      cursor:pointer;font-size:26px;display:flex;align-items:center;justify-content:center;
-                     box-shadow:0 4px 20px rgba(229,62,62,0.5);margin:0 auto 8px;">
+                     box-shadow:0 4px 20px rgba(229,62,62,0.5);transition:transform .15s;">
         📵
       </button>
-      <span style="font-size:13px;color:#aab;">Decline</span>
     </div>
-    <div style="text-align:center;">
-      <button id="acceptCallBtn"
-              style="width:64px;height:64px;border-radius:50%;background:#38a169;border:none;
-                     cursor:pointer;font-size:26px;display:flex;align-items:center;justify-content:center;
-                     box-shadow:0 4px 20px rgba(56,161,105,0.5);margin:0 auto 8px;">
-        📹
-      </button>
-      <span style="font-size:13px;color:#aab;">Accept</span>
+
+    <!-- Incoming Call Modal (Callee sees this) -->
+    <div id="incomingCallModal" style="display:none; position:fixed; inset:0; z-index:10000;
+         background:linear-gradient(160deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%);
+         flex-direction:column; align-items:center; justify-content:center; color:#fff;">
+      <div style="text-align:center; margin-bottom:48px;">
+        <div id="incomingCallAvatar" style="width:90px;height:90px;border-radius:50%;
+             background:linear-gradient(135deg,#667eea,#764ba2); display:flex;
+             align-items:center; justify-content:center; font-size:32px; font-weight:700;
+             margin:0 auto 16px; box-shadow:0 0 0 6px rgba(102,126,234,0.25),0 0 0 12px rgba(102,126,234,0.1);
+             animation:callPulse 1.5s ease-in-out infinite;"></div>
+        <h2 id="incomingCallName" style="font-size:22px;font-weight:600;margin:0 0 8px;"></h2>
+        <p style="color:#aab;font-size:15px;margin:0;">Incoming Video Call…</p>
+      </div>
+      <div style="display:flex;gap:48px;">
+        <div style="text-align:center;">
+          <button id="declineCallBtn"
+                  style="width:64px;height:64px;border-radius:50%;background:#e53e3e;border:none;
+                         cursor:pointer;font-size:26px;display:flex;align-items:center;justify-content:center;
+                         box-shadow:0 4px 20px rgba(229,62,62,0.5);margin:0 auto 8px;">
+            📵
+          </button>
+          <span style="font-size:13px;color:#aab;">Decline</span>
+        </div>
+        <div style="text-align:center;">
+          <button id="acceptCallBtn"
+                  style="width:64px;height:64px;border-radius:50%;background:#38a169;border:none;
+                         cursor:pointer;font-size:26px;display:flex;align-items:center;justify-content:center;
+                         box-shadow:0 4px 20px rgba(56,161,105,0.5);margin:0 auto 8px;">
+            📹
+          </button>
+          <span style="font-size:13px;color:#aab;">Accept</span>
+        </div>
+      </div>
     </div>
-  </div>
-</div>
 
-<!-- Active Video Call Window -->
-<div id="activeCallModal" style="display:none; position:fixed; inset:0; z-index:10000;
-     background:#000; flex-direction:column;">
-  <!-- Remote video (full screen) -->
-  <video id="remoteVideo" autoplay playsinline
-         style="width:100%;height:100%;object-fit:cover;background:#111;"></video>
+    <!-- Active Video Call Window -->
+    <div id="activeCallModal" style="display:none; position:fixed; inset:0; z-index:10000;
+         background:#000; flex-direction:column;">
+      <!-- Remote video (full screen) -->
+      <video id="remoteVideo" autoplay playsinline
+             style="width:100%;height:100%;object-fit:cover;background:#111;"></video>
 
-  <!-- Local video (PiP corner) -->
-  <video id="localVideo" autoplay playsinline muted
-         style="position:absolute;top:16px;right:16px;width:100px;height:140px;
-                object-fit:cover;border-radius:12px;border:2px solid rgba(255,255,255,0.3);
-                background:#222;box-shadow:0 4px 20px rgba(0,0,0,0.5);z-index:1;"></video>
+      <!-- Local video (PiP corner) -->
+      <video id="localVideo" autoplay playsinline muted
+             style="position:absolute;top:16px;right:16px;width:100px;height:140px;
+                    object-fit:cover;border-radius:12px;border:2px solid rgba(255,255,255,0.3);
+                    background:#222;box-shadow:0 4px 20px rgba(0,0,0,0.5);z-index:1;"></video>
 
-  <!-- Call info overlay top -->
-  <div style="position:absolute;top:0;left:0;right:0;padding:20px 20px 0;
-              background:linear-gradient(to bottom,rgba(0,0,0,0.6),transparent);z-index:2;">
-    <div id="callStatusText" style="color:#fff;font-size:14px;text-align:center;margin-bottom:4px;opacity:.8;">Connecting…</div>
-    <div id="callTimer" style="color:#fff;font-size:22px;font-weight:600;text-align:center;display:none;">00:00</div>
-  </div>
+      <!-- Call info overlay top -->
+      <div style="position:absolute;top:0;left:0;right:0;padding:20px 20px 0;
+                  background:linear-gradient(to bottom,rgba(0,0,0,0.6),transparent);z-index:2;">
+        <div id="callStatusText" style="color:#fff;font-size:14px;text-align:center;margin-bottom:4px;opacity:.8;">Connecting…</div>
+        <div id="callTimer" style="color:#fff;font-size:22px;font-weight:600;text-align:center;display:none;">00:00</div>
+      </div>
 
-  <!-- Control bar bottom -->
-  <div style="position:absolute;bottom:0;left:0;right:0;padding:24px 0 40px;
-              background:linear-gradient(to top,rgba(0,0,0,0.7),transparent);
-              display:flex;justify-content:center;gap:24px;z-index:2;">
-    <!-- Mute mic -->
-    <div style="text-align:center;">
-      <button id="muteAudioBtn"
-              style="width:56px;height:56px;border-radius:50%;background:rgba(255,255,255,0.2);
-                     border:none;cursor:pointer;font-size:22px;color:#fff;backdrop-filter:blur(6px);">
-        🎙️
-      </button>
-      <div style="color:#ddd;font-size:11px;margin-top:4px;">Mute</div>
+      <!-- Control bar bottom -->
+      <div style="position:absolute;bottom:0;left:0;right:0;padding:24px 0 40px;
+                  background:linear-gradient(to top,rgba(0,0,0,0.7),transparent);
+                  display:flex;justify-content:center;gap:24px;z-index:2;">
+        <!-- Mute mic -->
+        <div style="text-align:center;">
+          <button id="muteAudioBtn"
+                  style="width:56px;height:56px;border-radius:50%;background:rgba(255,255,255,0.2);
+                         border:none;cursor:pointer;font-size:22px;color:#fff;backdrop-filter:blur(6px);">
+            🎙️
+          </button>
+          <div style="color:#ddd;font-size:11px;margin-top:4px;">Mute</div>
+        </div>
+        <!-- Toggle camera -->
+        <div style="text-align:center;">
+          <button id="toggleVideoBtn"
+                  style="width:56px;height:56px;border-radius:50%;background:rgba(255,255,255,0.2);
+                         border:none;cursor:pointer;font-size:22px;color:#fff;backdrop-filter:blur(6px);">
+            📹
+          </button>
+          <div style="color:#ddd;font-size:11px;margin-top:4px;">Camera</div>
+        </div>
+        <!-- End call -->
+        <div style="text-align:center;">
+          <button id="endCallBtn"
+                  style="width:56px;height:56px;border-radius:50%;background:#e53e3e;
+                         border:none;cursor:pointer;font-size:22px;
+                         box-shadow:0 4px 20px rgba(229,62,62,0.5);">
+            📵
+          </button>
+          <div style="color:#ddd;font-size:11px;margin-top:4px;">End</div>
+        </div>
+      </div>
     </div>
-    <!-- Toggle camera -->
-    <div style="text-align:center;">
-      <button id="toggleVideoBtn"
-              style="width:56px;height:56px;border-radius:50%;background:rgba(255,255,255,0.2);
-                     border:none;cursor:pointer;font-size:22px;color:#fff;backdrop-filter:blur(6px);">
-        📹
-      </button>
-      <div style="color:#ddd;font-size:11px;margin-top:4px;">Camera</div>
-    </div>
-    <!-- End call -->
-    <div style="text-align:center;">
-      <button id="endCallBtn"
-              style="width:56px;height:56px;border-radius:50%;background:#e53e3e;
-                     border:none;cursor:pointer;font-size:22px;
-                     box-shadow:0 4px 20px rgba(229,62,62,0.5);">
-        📵
-      </button>
-      <div style="color:#ddd;font-size:11px;margin-top:4px;">End</div>
-    </div>
-  </div>
-</div>
 
-<!-- ==================== LOCATION MAP MESSAGE CARD CSS ==================== -->
-<style>
-@keyframes callPulse {
-  0%,100% { box-shadow: 0 0 0 6px rgba(102,126,234,0.25), 0 0 0 12px rgba(102,126,234,0.1); }
-  50%      { box-shadow: 0 0 0 10px rgba(102,126,234,0.35), 0 0 0 20px rgba(102,126,234,0.15); }
-}
-.location-card {
-  display: flex;
-  flex-direction: column;
-  border-radius: 12px;
-  overflow: hidden;
-  min-width: 220px;
-  max-width: 260px;
-  cursor: pointer;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.18);
-  text-decoration: none;
-  color: inherit;
-}
-.location-map-placeholder {
-  width: 100%;
-  height: 80px;
-  background: linear-gradient(135deg,#c8e6c9,#66bb6a);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-direction: column;
-  gap: 2px;
-}
-.location-map-placeholder .loc-coords {
-  font-size: 10px;
-  color: #1b5e20;
-  font-weight: 500;
-  font-family: monospace;
-}
-.location-card-footer {
-  background: #fff;
-  padding: 6px 10px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  color: #333;
-  border-top: 1px solid #e0e0e0;
-}
-.location-card-footer .loc-icon { font-size: 14px; }
-.location-time-row {
-  display: flex;
-  justify-content: flex-end;
-  padding: 2px 4px 0;
-}
-.sent .location-card { border: 1px solid #d4f5c0; }
-.received .location-card { border: 1px solid #e0e0e0; }
-</style>
+    <!-- ==================== LOCATION MAP MESSAGE CARD CSS ==================== -->
+    <style>
+    @keyframes callPulse {
+      0%,100% { box-shadow: 0 0 0 6px rgba(102,126,234,0.25), 0 0 0 12px rgba(102,126,234,0.1); }
+      50%      { box-shadow: 0 0 0 10px rgba(102,126,234,0.35), 0 0 0 20px rgba(102,126,234,0.15); }
+    }
+    .location-card {
+      display: flex;
+      flex-direction: column;
+      border-radius: 12px;
+      overflow: hidden;
+      min-width: 220px;
+      max-width: 260px;
+      cursor: pointer;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+      text-decoration: none;
+      color: inherit;
+    }
+    .location-map-placeholder {
+      width: 100%;
+      height: 80px;
+      background: linear-gradient(135deg,#c8e6c9,#66bb6a);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .location-map-placeholder .loc-coords {
+      font-size: 10px;
+      color: #1b5e20;
+      font-weight: 500;
+      font-family: monospace;
+    }
+    .location-card-footer {
+      background: #fff;
+      padding: 6px 10px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #333;
+      border-top: 1px solid #e0e0e0;
+    }
+    .location-card-footer .loc-icon { font-size: 14px; }
+    .location-time-row {
+      display: flex;
+      justify-content: flex-end;
+      padding: 2px 4px 0;
+    }
+    .sent .location-card { border: 1px solid #d4f5c0; }
+    .received .location-card { border: 1px solid #e0e0e0; }
+    </style>
 
-<!-- Image Lightbox (in-app, no new tab) -->
-<div id="imageLightbox" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.88);
-     z-index:9999; flex-direction:column; align-items:center; justify-content:center; padding:16px;">
-    <div style="position:absolute; top:12px; right:16px; display:flex; gap:12px; align-items:center;">
-        <span id="lightboxFilename" style="color:#ddd; font-size:13px; max-width:240px;
-              overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></span>
-        <button id="lightboxSaveBtn"
-                style="background:#667eea; color:#fff; border:none; border-radius:8px;
-                       padding:7px 14px; cursor:pointer; font-size:13px; font-weight:600;">
-            ⬇ Save
-        </button>
-        <button id="lightboxCloseBtn"
-                style="background:#555; color:#fff; border:none; border-radius:8px;
-                       padding:7px 14px; cursor:pointer; font-size:20px; line-height:1;">
-            ✕
-        </button>
+    <!-- Image Lightbox (in-app, no new tab) -->
+    <div id="imageLightbox" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.88);
+         z-index:9999; flex-direction:column; align-items:center; justify-content:center; padding:16px;">
+        <div style="position:absolute; top:12px; right:16px; display:flex; gap:12px; align-items:center;">
+            <span id="lightboxFilename" style="color:#ddd; font-size:13px; max-width:240px;
+                  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></span>
+            <button id="lightboxSaveBtn"
+                    style="background:#667eea; color:#fff; border:none; border-radius:8px;
+                           padding:7px 14px; cursor:pointer; font-size:13px; font-weight:600;">
+                ⬇ Save
+            </button>
+            <button id="lightboxCloseBtn"
+                    style="background:#555; color:#fff; border:none; border-radius:8px;
+                           padding:7px 14px; cursor:pointer; font-size:20px; line-height:1;">
+                ✕
+            </button>
+        </div>
+        <img id="lightboxImg" src="" alt=""
+             style="max-width:92vw; max-height:86vh; border-radius:10px; object-fit:contain;
+                    box-shadow:0 8px 40px rgba(0,0,0,0.6); margin-top:40px;">
     </div>
-    <img id="lightboxImg" src="" alt=""
-         style="max-width:92vw; max-height:86vh; border-radius:10px; object-fit:contain;
-                box-shadow:0 8px 40px rgba(0,0,0,0.6); margin-top:40px;">
-</div>
 
-<script src="/static/crypto.js"></script>
-<script src="/static/app.js"></script>
-</body>
-</html>
+    <!-- Date Filter Modal for paginated chat history -->
+    <div id="dateFilterModal">
+        <div class="dfm-box">
+            <h3>📅 Load messages until date</h3>
+            <p>Messages sent before the selected date will be loaded.</p>
+            <input type="date" id="dateFilterInput">
+            <div class="dfm-buttons">
+                <button class="dfm-cancel" id="dateFilterCancelBtn">Cancel</button>
+                <button class="dfm-apply" id="dateFilterApplyBtn">Load</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/crypto.js"></script>
+    <script src="/static/app.js"></script>
+    </body>
+    </html>
