@@ -1118,6 +1118,9 @@
         .db-action-btn.danger {
             background: linear-gradient(135deg, #e53e3e 0%, #9b2335 100%);
         }
+        .db-action-btn.neutral {
+            background: linear-gradient(135deg, #0ea5e9 0%, #0369a1 100%);
+        }
         .db-log {
             background: #0f172a;
             color: #86efac;
@@ -1152,7 +1155,8 @@
         }
         .db-upload-label:hover { border-color: #667eea; color: #667eea; }
         .db-upload-label input[type="file"] { display: none; }
-        #dbRestoreFilename {
+        #dbRestoreFilename,
+        #dbDecryptFilename {
             font-size: 12px;
             color: #374151;
             font-weight: 600;
@@ -1592,7 +1596,7 @@
             server never sees your backup password.
         </p>
 
-        <!-- ── DOWNLOAD / DUMP ── -->
+        <!-- ── SECTION 1: DOWNLOAD / DUMP ── -->
         <div class="db-section">
             <h3>⬇ Download Database Dump</h3>
             <div class="db-password-row">
@@ -1603,12 +1607,40 @@
             <div id="dbDumpLog" class="db-log"></div>
         </div>
 
-        <!-- ── UPLOAD / RESTORE ── -->
+        <!-- ── SECTION 2: DECRYPT TO DISK (offline inspection) ── -->
         <div class="db-section">
-            <h3>⬆ Restore from Dump</h3>
+            <h3>🔓 Decrypt Backup to Raw Dump</h3>
+            <p style="color:#888;font-size:12px;margin-bottom:8px;">
+                Decrypts a <code>.enc</code> file locally in your browser and saves the
+                raw <code>.sql.gz</code> or <code>.db.gz</code> to your disk.
+                Completely offline — no server contact needed.
+            </p>
             <label class="db-upload-label">
                 <span>📂</span>
-                <span id="dbRestoreFilename">Choose encrypted dump file…</span>
+                <span id="dbDecryptFilename">Choose .enc backup file…</span>
+                <input type="file" id="dbDecryptFile" accept=".enc">
+            </label>
+            <div class="db-password-row">
+                <input type="password" id="dbDecryptPassword"
+                       placeholder="Backup encryption password"
+                       autocomplete="new-password">
+                <button class="db-action-btn neutral" id="dbDecryptBtn" disabled>
+                    Decrypt &amp; Save
+                </button>
+            </div>
+            <div id="dbDecryptLog" class="db-log"></div>
+        </div>
+
+        <!-- ── SECTION 3: RESTORE (upload to server) ── -->
+        <div class="db-section">
+            <h3>⬆ Restore from Dump</h3>
+            <p style="color:#888;font-size:12px;margin-bottom:8px;">
+                Decrypts the <code>.enc</code> file locally, then uploads the raw dump
+                to the server to overwrite the live database.
+            </p>
+            <label class="db-upload-label">
+                <span>📂</span>
+                <span id="dbRestoreFilename">Choose encrypted dump .enc file…</span>
                 <input type="file" id="dbRestoreFile" accept=".enc">
             </label>
             <div class="db-password-row">

@@ -2862,9 +2862,9 @@ async function encryptDump(dumpBytes, password) {
     const key  = await deriveBackupKey(password, salt);
     const ct   = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, dumpBytes);
 
-    // Layout: [4-byte magic] [16-byte salt] [12-byte iv] [ciphertext]
-    const magic = new Uint8Array([0x53, 0x43, 0x44, 0x42]); // "SCDB"
-    const out = new Uint8Array(4 + 16 + 12 + ct.byteLength);
+    // File layout: [4-byte magic "SCDB"] [16-byte salt] [12-byte iv] [ciphertext]
+    const magic = new Uint8Array([0x53, 0x43, 0x44, 0x42]); // ASCII "SCDB"
+    const out   = new Uint8Array(4 + 16 + 12 + ct.byteLength);
     out.set(magic, 0);
     out.set(salt,  4);
     out.set(iv,   20);
@@ -2873,23 +2873,27 @@ async function encryptDump(dumpBytes, password) {
 }
 
 async function decryptDump(encBytes, password) {
-    const buf    = new Uint8Array(encBytes);
-    const magic  = buf.slice(0, 4);
+    const buf   = new Uint8Array(encBytes);
+    const magic = buf.slice(0, 4);
+
     if (String.fromCharCode(...magic) !== "SCDB") {
-        throw new Error("Not a valid SecureChat backup file (bad magic bytes).");
+        throw new Error("Not a valid SecureChat backup file (bad magic bytes). " +
+                        "Make sure you selected the correct .enc file.");
     }
     const salt = buf.slice(4,  20);
     const iv   = buf.slice(20, 32);
     const ct   = buf.slice(32);
     const key  = await deriveBackupKey(password, salt);
+
     try {
         return await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ct);
     } catch {
-        throw new Error("Decryption failed — wrong backup password?");
+        throw new Error("Decryption failed — wrong backup password, or the file is corrupted.");
     }
 }
 
-// ── Log helper ───────────────────────────────────────────────
+// ── Terminal log helper ───────────────────────────────────────
+
 function dbLog(logEl, message, type = "info") {
     logEl.classList.add("visible");
     const line = document.createElement("div");
@@ -2905,15 +2909,37 @@ function dbLogClear(logEl) {
     logEl.classList.remove("visible");
 }
 
-// ── Show / hide ──────────────────────────────────────────────
+// ── Trigger a browser download of arbitrary bytes ─────────────
+
+function triggerDownload(buffer, filename) {
+    const blob = new Blob([buffer], { type: "application/octet-stream" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+// ── Show / hide modal ─────────────────────────────────────────
+
 function showDbBackupModal() {
-    dbLogClear(document.getElementById("dbDumpLog"));
-    dbLogClear(document.getElementById("dbRestoreLog"));
-    document.getElementById("dbDumpPassword").value    = "";
-    document.getElementById("dbRestorePassword").value = "";
-    document.getElementById("dbRestoreFile").value     = "";
-    document.getElementById("dbRestoreFilename").textContent = "Choose encrypted dump file…";
-    document.getElementById("dbRestoreBtn").disabled   = true;
+    // Clear all logs and inputs every time the modal opens
+    ["dbDumpLog", "dbDecryptLog", "dbRestoreLog"].forEach(id =>
+        dbLogClear(document.getElementById(id))
+    );
+    ["dbDumpPassword", "dbDecryptPassword", "dbRestorePassword"].forEach(id =>
+        document.getElementById(id).value = ""
+    );
+    ["dbDecryptFile", "dbRestoreFile"].forEach(id =>
+        document.getElementById(id).value = ""
+    );
+    document.getElementById("dbDecryptFilename").textContent = "Choose .enc backup file…";
+    document.getElementById("dbRestoreFilename").textContent  = "Choose .enc backup file…";
+    document.getElementById("dbDecryptBtn").disabled = true;
+    document.getElementById("dbRestoreBtn").disabled  = true;
     document.getElementById("dbBackupModal").classList.add("show");
 }
 
@@ -2921,7 +2947,14 @@ function hideDbBackupModal() {
     document.getElementById("dbBackupModal").classList.remove("show");
 }
 
-// ── DOWNLOAD DUMP ────────────────────────────────────────────
+// ── SECTION 1: DOWNLOAD DUMP ──────────────────────────────────
+//
+// Flow:
+//   1. POST /api/admin/db/dump  { username, auth_hash }
+//   2. Server returns raw .gz bytes
+//   3. Browser encrypts:  PBKDF2(backupPassword) → AES-256-GCM → .enc file
+//   4. Browser triggers download of .enc file
+//
 async function handleDbDump() {
     const password = document.getElementById("dbDumpPassword").value.trim();
     const logEl    = document.getElementById("dbDumpLog");
@@ -2934,15 +2967,9 @@ async function handleDbDump() {
         return;
     }
 
-    // Re-derive auth hash so the server can verify admin identity
-    let authHash;
-    try {
-        // Pull encrypted vault from sessionStorage (set during login)
-        const storedAuthHash = sessionStorage.getItem("authHash");
-        if (!storedAuthHash) throw new Error("Auth hash not in session — please log out and back in.");
-        authHash = storedAuthHash;
-    } catch (e) {
-        dbLog(logEl, "Could not retrieve auth credentials: " + e.message, "err");
+    const authHash = sessionStorage.getItem("authHash");
+    if (!authHash) {
+        dbLog(logEl, "Session expired — please log out and log back in.", "err");
         return;
     }
 
@@ -2976,16 +3003,10 @@ async function handleDbDump() {
 
         // Trigger browser download
         const encFilename = dumpFilename + ".enc";
-        const blob = new Blob([encryptedBuf], { type: "application/octet-stream" });
-        const url  = URL.createObjectURL(blob);
-        const a    = document.createElement("a");
-        a.href = url; a.download = encFilename;
-        document.body.appendChild(a); a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        triggerDownload(encryptedBuf, encFilename);
 
-        dbLog(logEl, `✓ Encrypted dump saved as: ${encFilename}`, "ok");
-        dbLog(logEl, "Keep this file and your backup password in a safe place.", "warn");
+        dbLog(logEl, `✓ Saved as: ${encFilename}`, "ok");
+        dbLog(logEl, "Store this file and your backup password safely — they are independent of your login password.", "warn");
 
     } catch (e) {
         dbLog(logEl, "Unexpected error: " + e.message, "err");
@@ -2995,7 +3016,83 @@ async function handleDbDump() {
     }
 }
 
-// ── RESTORE DUMP ─────────────────────────────────────────────
+// ── SECTION 2: DECRYPT TO DISK ────────────────────────────────
+//
+// Entirely offline — no server contact at all.
+//
+// Flow:
+//   1. Admin picks a .enc file from disk
+//   2. Admin enters the backup password they used when downloading
+//   3. Browser decrypts: AES-256-GCM → raw .gz bytes
+//   4. Browser triggers download of the raw .gz file
+//      (open with gunzip + psql, or DB Browser for SQLite)
+//
+async function handleDbDecrypt() {
+    const fileInput = document.getElementById("dbDecryptFile");
+    const password  = document.getElementById("dbDecryptPassword").value.trim();
+    const logEl     = document.getElementById("dbDecryptLog");
+    const btn       = document.getElementById("dbDecryptBtn");
+
+    dbLogClear(logEl);
+
+    if (!fileInput.files || !fileInput.files[0]) {
+        dbLog(logEl, "No file selected.", "err");
+        return;
+    }
+    if (password.length < 8) {
+        dbLog(logEl, "Backup encryption password must be at least 8 characters.", "err");
+        return;
+    }
+
+    btn.disabled    = true;
+    btn.textContent = "Decrypting…";
+
+    try {
+        const encFilename = fileInput.files[0].name;           // e.g. securechat_pg_dump_20240101_120000.sql.gz.enc
+        const rawFilename = encFilename.replace(/\.enc$/, ""); // strip .enc → .sql.gz or .db.gz
+
+        dbLog(logEl, `Reading: ${encFilename}`, "info");
+        const encBytes = await fileInput.files[0].arrayBuffer();
+        dbLog(logEl, `File size: ${(encBytes.byteLength / 1024).toFixed(1)} KB`, "info");
+
+        dbLog(logEl, "Decrypting with AES-256-GCM (all in browser, no network)…", "info");
+        let rawBytes;
+        try {
+            rawBytes = await decryptDump(encBytes, password);
+        } catch (e) {
+            dbLog(logEl, e.message, "err");
+            return;
+        }
+        dbLog(logEl, `Decrypted: ${(rawBytes.byteLength / 1024).toFixed(1)} KB`, "ok");
+
+        triggerDownload(rawBytes, rawFilename);
+
+        dbLog(logEl, `✓ Saved as: ${rawFilename}`, "ok");
+
+        // Tell the admin what to do with the file
+        if (rawFilename.endsWith(".sql.gz")) {
+            dbLog(logEl, "To inspect: gunzip the file, then open with psql or pgAdmin.", "warn");
+        } else if (rawFilename.endsWith(".db.gz")) {
+            dbLog(logEl, "To inspect: gunzip the file, then open with DB Browser for SQLite.", "warn");
+        }
+
+    } catch (e) {
+        dbLog(logEl, "Unexpected error: " + e.message, "err");
+    } finally {
+        btn.disabled    = false;
+        btn.textContent = "Decrypt & Save";
+    }
+}
+
+// ── SECTION 3: RESTORE TO SERVER ─────────────────────────────
+//
+// Flow:
+//   1. Admin picks a .enc file from disk
+//   2. Admin enters the backup password used when downloading
+//   3. Browser decrypts: AES-256-GCM → raw .gz bytes
+//   4. Browser uploads raw .gz to POST /api/admin/db/restore
+//   5. Server decompresses and restores; returns step-by-step log
+//
 async function handleDbRestore() {
     const fileInput = document.getElementById("dbRestoreFile");
     const password  = document.getElementById("dbRestorePassword").value.trim();
@@ -3005,25 +3102,24 @@ async function handleDbRestore() {
     dbLogClear(logEl);
 
     if (!fileInput.files || !fileInput.files[0]) {
-        dbLog(logEl, "No file selected.", "err"); return;
+        dbLog(logEl, "No file selected.", "err");
+        return;
     }
     if (password.length < 8) {
-        dbLog(logEl, "Backup encryption password must be at least 8 characters.", "err"); return;
+        dbLog(logEl, "Backup encryption password must be at least 8 characters.", "err");
+        return;
     }
 
     const confirmed = confirm(
-        "⚠️ WARNING: Restoring will OVERWRITE the current database.\n\n" +
-        "Make sure you have a recent backup of the current state before proceeding.\n\n" +
-        "Type OK to continue."
+        "⚠️ WARNING: This will OVERWRITE the live database with the backup.\n\n" +
+        "The current state will be lost (SQLite makes an automatic safety copy; " +
+        "Postgres does not).\n\nPress OK to continue."
     );
     if (!confirmed) return;
 
-    let authHash;
-    try {
-        authHash = sessionStorage.getItem("authHash");
-        if (!authHash) throw new Error("Auth hash not in session — please log out and back in.");
-    } catch (e) {
-        dbLog(logEl, "Could not retrieve auth credentials: " + e.message, "err");
+    const authHash = sessionStorage.getItem("authHash");
+    if (!authHash) {
+        dbLog(logEl, "Session expired — please log out and log back in.", "err");
         return;
     }
 
@@ -3031,7 +3127,7 @@ async function handleDbRestore() {
     btn.textContent = "Restoring…";
 
     try {
-        dbLog(logEl, "Reading encrypted backup file…", "info");
+        dbLog(logEl, `Reading: ${fileInput.files[0].name}`, "info");
         const encBytes = await fileInput.files[0].arrayBuffer();
         dbLog(logEl, `File size: ${(encBytes.byteLength / 1024).toFixed(1)} KB`, "info");
 
@@ -3045,18 +3141,14 @@ async function handleDbRestore() {
         }
         dbLog(logEl, `Decrypted dump: ${(dumpBytes.byteLength / 1024).toFixed(1)} KB`, "ok");
 
-        dbLog(logEl, "Uploading decrypted dump to server for restore…", "info");
+        dbLog(logEl, "Uploading decrypted dump to server…", "info");
 
         const formData = new FormData();
         formData.append("username",  currentUser);
         formData.append("auth_hash", authHash);
         formData.append("file",      new Blob([dumpBytes], { type: "application/gzip" }), "restore.gz");
 
-        const res = await fetch("/api/admin/db/restore", {
-            method: "POST",
-            body: formData,
-        });
-
+        const res  = await fetch("/api/admin/db/restore", { method: "POST", body: formData });
         const data = await res.json().catch(() => null);
 
         if (!res.ok) {
@@ -3082,25 +3174,29 @@ async function handleDbRestore() {
         dbLog(logEl, "Unexpected error: " + e.message, "err");
     } finally {
         btn.disabled = false;
-        btn.textContent = "Restore";
+        btn.textContent = "Restore to Server";
     }
 }
 
-// ── File picker feedback ─────────────────────────────────────
+// ── File picker label feedback ────────────────────────────────
+
 function initDbBackupFileInput() {
-    const input = document.getElementById("dbRestoreFile");
-    if (!input) return;
-    input.addEventListener("change", () => {
-        const file = input.files && input.files[0];
+    // Decrypt file picker
+    document.getElementById("dbDecryptFile").addEventListener("change", function () {
+        const file  = this.files && this.files[0];
+        const label = document.getElementById("dbDecryptFilename");
+        const btn   = document.getElementById("dbDecryptBtn");
+        label.textContent = file ? file.name : "Choose .enc backup file…";
+        btn.disabled      = !file;
+    });
+
+    // Restore file picker
+    document.getElementById("dbRestoreFile").addEventListener("change", function () {
+        const file  = this.files && this.files[0];
         const label = document.getElementById("dbRestoreFilename");
         const btn   = document.getElementById("dbRestoreBtn");
-        if (file) {
-            label.textContent = file.name;
-            btn.disabled = false;
-        } else {
-            label.textContent = "Choose encrypted dump file…";
-            btn.disabled = true;
-        }
+        label.textContent = file ? file.name : "Choose .enc backup file…";
+        btn.disabled      = !file;
     });
 }
 
@@ -3417,6 +3513,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.target.id === 'dbBackupModal') hideDbBackupModal();
     });
     document.getElementById('dbDumpBtn').addEventListener('click', handleDbDump);
+    document.getElementById('dbDecryptBtn').addEventListener('click', handleDbDecrypt);
     document.getElementById('dbRestoreBtn').addEventListener('click', handleDbRestore);
     initDbBackupFileInput();
 
