@@ -22,6 +22,7 @@ let unreadCounts = {};
 let blockedUsers = [];
 let mutedUsers = [];
 let typingTimeout = null;
+let onlineUsers = new Set(); // ── NEW: tracks which usernames are currently online
 
 // ==================== PAGINATION STATE ====================
 let chatPagination = {
@@ -764,6 +765,19 @@ function connectWebSocket() {
         } else if (data.type === 'signal') {
             // WebRTC signaling relay
             handleCallSignal(data.signal);
+        } else if (data.type === 'online_status') {
+            // ── NEW: a user came online or went offline ──
+            if (data.online) {
+                onlineUsers.add(data.username);
+            } else {
+                onlineUsers.delete(data.username);
+            }
+            // Refresh the contact list so the dot appears/disappears immediately
+            renderUsersList();
+            // Also update the chat header status if we're currently chatting with this user
+            if (currentRecipient === data.username) {
+                updateChatHeaderOnlineStatus(data.username);
+            }
         }
     };
 
@@ -955,7 +969,10 @@ function renderUsersList() {
         const unreadCount = unreadCounts[contact.username] || 0;
 
         userItem.innerHTML = `
-            <div class="user-avatar">${getInitials(contact.username)}</div>
+            <div class="user-avatar">
+                ${getInitials(contact.username)}
+                ${onlineUsers.has(contact.username) ? '<span class="online-dot"></span>' : ''}
+            </div>
             <div class="user-info">
                 <div class="user-name">${contact.username}</div>
                 <div class="user-last-message">
@@ -995,6 +1012,8 @@ async function openChat(username) {
     document.getElementById('chatPage').style.display = 'flex';
     document.getElementById('chatUserAvatar').textContent = getInitials(username);
     document.getElementById('chatUserName').textContent = username;
+    // ── NEW: set online status in header immediately when chat opens ──
+    updateChatHeaderOnlineStatus(username);
 
     // Update chat settings menu state
     updateChatSettingsMenu();
@@ -1193,6 +1212,17 @@ function backToUserList() {
     document.getElementById('chatPage').style.display = 'none';
     document.getElementById('userListPage').style.display = 'flex';
     hideTypingIndicator();
+}
+
+// ── NEW: update the "Online" / encrypted sub-label in the chat header ──
+function updateChatHeaderOnlineStatus(username) {
+    const statusEl = document.getElementById('chatUserStatus');
+    if (!statusEl) return;
+    if (onlineUsers.has(username)) {
+        statusEl.innerHTML = '<span class="chat-online-badge">● Online</span>';
+    } else {
+        statusEl.innerHTML = '🔐 End-to-end encrypted';
+    }
 }
 
 function createMessageElement(msg) {

@@ -1173,6 +1173,24 @@ async def websocket_endpoint(websocket: WebSocket, username: str):
         await websocket.send_json({"type": "auth_success"})
         await manager.connect(username, websocket)
 
+        # ── NEW: notify all currently-online users that this user just came online ──
+        online_status_payload = {"type": "online_status", "username": username, "online": True}
+        for other_username, other_ws in list(manager.active_connections.items()):
+            if other_username != username:
+                try:
+                    await other_ws.send_json(online_status_payload)
+                except Exception:
+                    pass
+        # Also send the current online roster to the newly connected user
+        for other_username in list(manager.active_connections.keys()):
+            if other_username != username:
+                try:
+                    await websocket.send_json(
+                        {"type": "online_status", "username": other_username, "online": True}
+                    )
+                except Exception:
+                    pass
+
     except asyncio.TimeoutError:
         await websocket.send_json({"type": "error", "message": "Authentication timeout"})
         await websocket.close(code=1008)
@@ -1423,12 +1441,26 @@ async def websocket_endpoint(websocket: WebSocket, username: str):
 
     except WebSocketDisconnect:
         manager.disconnect(username)
+        # ── NEW: notify all remaining online users that this user went offline ──
+        offline_payload = {"type": "online_status", "username": username, "online": False}
+        for other_ws in list(manager.active_connections.values()):
+            try:
+                await other_ws.send_json(offline_payload)
+            except Exception:
+                pass
         db.close()
     except Exception as e:
         print(f"WebSocket error: {e}")
         import traceback
         traceback.print_exc()
         manager.disconnect(username)
+        # ── NEW: broadcast offline on unexpected disconnect too ──
+        offline_payload = {"type": "online_status", "username": username, "online": False}
+        for other_ws in list(manager.active_connections.values()):
+            try:
+                await other_ws.send_json(offline_payload)
+            except Exception:
+                pass
         db.close()
 
 class ApproveUserRequest(BaseModel):
